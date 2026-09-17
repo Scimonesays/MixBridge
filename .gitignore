@@ -1,0 +1,68 @@
+# Research clones (never commit upstream trees)
+research/upstream/
+
+# Build outputs
+**/target/
+**/build/
+**/out/
+**/dist/
+**/cmake-build-*/
+**/.vs/
+**/*.user
+**/*.suo
+**/*.obj
+**/*.pdb
+**/*.ilk
+**/*.exp
+**/*.lib
+**/*.dll
+**/*.exe
+!**/.gitkeep
+
+# Node / frontend
+**/node_modules/
+**/.vite/
+**/*.tsbuildinfo
+
+# Rust
+**/.cargo-cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+
+# Logs and local QA scratch (keep latest summaries; ignore bulky/raw logs)
+artifacts/qa/**/logs/
+artifacts/qa/**/screenshots/
+artifacts/qa/**/*.wav
+artifacts/qa/**/*.log
+*.log
+
+# Driver signing / local certs
+*.cer
+*.cat
+*.sys
+!native/driver/**/.gitkeep
+
+# VST3 scan cache / local plugin state
+**/.mixbridge/
+**/plugin-cache/
+**/quarantine/
+
+# Test temp
+**/tmp/
+**/temp/
+tests/fixtures/generated/

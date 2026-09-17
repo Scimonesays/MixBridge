@@ -1,0 +1,75 @@
+{
+  "generated_at": "2026-09-17T22:30:00Z",
+  "note": "Shallow clones under research/upstream/ (gitignored). Hashes are exact HEAD at clone time.",
+  "repositories": [
+    {
+      "project": "3godzinyL/Virtual-Soundboard-Audio-Windows-Mixer",
+      "local_dir": "Virtual-Soundboard-Audio-Windows-Mixer",
+      "commit": "4ec7e53c0ac37291187d92f3d75bf88af469895c",
+      "commit_date": "2026-07-31"
+    },
+    {
+      "project": "ytchenak/wasamix",
+      "local_dir": "wasamix",
+      "commit": "80b4b828d5d083c6670297f11564bd69e7230f24",
+      "commit_date": "2026-04-26"
+    },
+    {
+      "project": "VirtualDrivers/Virtual-Audio-Driver",
+      "local_dir": "Virtual-Audio-Driver",
+      "commit": "bb34fba15faf569a6ae9bdea360bc1cf4821354e",
+      "commit_date": "2026-03-03"
+    },
+    {
+      "project": "RustAudio/cpal",
+      "local_dir": "cpal",
+      "commit": "c81153143724d91fce4161a15cb895b2cfab7da7",
+      "commit_date": "2026-09-11"
+    },
+    {
+      "project": "steinbergmedia/vst3sdk",
+      "local_dir": "vst3sdk",
+      "commit": "3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96",
+      "commit_date": "2026-08-11",
+      "notes": "Shallow clone without submodules; full SDK build requires submodule init."
+    },
+    {
+      "project": "HelgeSverre/rust-vst3-host",
+      "local_dir": "rust-vst3-host",
+      "commit": "49fc189177c72cf799d5034fcca81d8aacc3d7a6",
+      "commit_date": "2026-08-09"
+    },
+    {
+      "project": "truce-audio/truce-rack",
+      "local_dir": "truce-rack",
+      "commit": "233f56c7788291b2f24e3f2aba3a767330f72cb7",
+      "commit_date": "2026-06-19"
+    },
+    {
+      "project": "jamulussoftware/jamulus",
+      "local_dir": "jamulus",
+      "commit": "cc40a8a9442879a39dd9fda3ee4f61fccde2c2ba",
+      "commit_date": "2026-09-14"
+    },
+    {
+      "project": "sonosaurus/sonobus",
+      "local_dir": "sonobus",
+      "commit": "35f1062dab196b9838a4bb529c4bf6592b7f5987",
+      "commit_date": "2026-09-04"
+    },
+    {
+      "project": "microsoft/Windows-classic-samples",
+      "local_dir": "Windows-classic-samples",
+      "commit": "434f6002bdf9cf9829406c3ff2b33387982d6168",
+      "commit_date": "2026-09-03",
+      "sparse": ["Samples"]
+    },
+    {
+      "project": "microsoft/Windows-driver-samples",
+      "local_dir": "Windows-driver-samples",
+      "commit": "97429c5623590d52f001249460daf43e6749d777",
+      "commit_date": "2026-09-16",
+      "sparse": ["audio"]
+    }
+  ]
+}

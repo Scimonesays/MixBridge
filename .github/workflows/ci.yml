@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  probes:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure probes
+        shell: pwsh
+        run: |
+          cmake -S native/probes -B native/probes/build -G "Visual Studio 17 2022" -A x64
+      - name: Build probes
+        shell: pwsh
+        run: cmake --build native/probes/build --config Release
+      - name: DSP tests
+        shell: pwsh
+        run: |
+          ctest --test-dir native/probes/build -C Release --output-on-failure
+      - name: Configure engine
+        shell: pwsh
+        run: |
+          cmake -S native/audio-engine -B native/audio-engine/build -G "Visual Studio 17 2022" -A x64
+      - name: Build engine
+        shell: pwsh
+        run: cmake --build native/audio-engine/build --config Release
+      - name: Engine tests
+        shell: pwsh
+        run: |
+          ctest --test-dir native/audio-engine/build -C Release --output-on-failure
+      - name: License files present
+        shell: pwsh
+        run: |
+          Test-Path LICENSE
+          Test-Path docs/legal/LICENSE_MATRIX.md
+          Test-Path third_party/THIRD_PARTY_NOTICES.md
+          Test-Path docs/research/UPSTREAM_REVIEW.md

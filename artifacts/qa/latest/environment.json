@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-09-17T22:33:00Z",
+  "os": "Windows 11 25H2 build 26200 x64",
+  "toolchain": {
+    "git": "2.47.1",
+    "cmake": "4.3.3",
+    "msvc": "19.44.35213",
+    "vs_build_tools": "17.14.9",
+    "windows_sdk": "10.0.26100",
+    "node": "24.13.0",
+    "npm": "11.6.2",
+    "rustc": "1.98.1",
+    "cargo": "1.98.1",
+    "ninja": "1.13.2",
+    "wdk_km_headers": false
+  },
+  "audio_hardware_observed": {
+    "capture": [
+      "RME Fireface UC Analog 1+2 / 3+4 / 5+6",
+      "Mic-j5 WebCam",
+      "Steam Streaming Microphone"
+    ],
+    "render": [
+      "RME Fireface UC Speakers / Analog 3+4 / 5+6",
+      "NVIDIA HDMI outputs"
+    ]
+  },
+  "blockers": [
+    "WDK not installed — MixBridge VAD driver packaging blocked; fallback backends continue"
+  ]
+}
