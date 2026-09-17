@@ -134,7 +134,9 @@ Why:
 Binary: `mb-engine-ipc.exe`  
 Protocol version header: `OK HELLO mixbridge-ipc/1`
 
-Commands include `PING`, `STATUS`, `START`, `STOP`, `ADD_TONE`, `SET_GAIN`, `SET_MUTE`, `METER_MASTER`, `LIST_CAPTURE`, `LIST_RENDER`, `SHUTDOWN`.
+Commands include `PING`, `STATUS` (engine + broadcast + LIVE_DEST), `START`, `STOP`, `RESTART`, `BROADCAST_ENABLE`, `BROADCAST_DISABLE`, `ADD_TONE`, `ADD_PHYSICAL`, `ADD_PROCESS`, `REMOVE`, `SET_GAIN`, `SET_MUTE`, `SET_MONITOR`, `SET_BROADCAST`, `METER_MASTER`, `METER_BROADCAST`, `METER_SOURCE`, `LIST_CAPTURE`, `LIST_RENDER`, `LIST_PROCESSES`, `LIST_SOURCES`, `SHUTDOWN`.
+
+`BROADCAST_ENABLE` refuses with `no_live_destination` until a real live sink is registered (Phase 6). Dev-only override: `MIXBRIDGE_DEV_LIVE_SINK=1` (never a production destination).
 
 Tauri shell talks to this pipe via Rust commands; it does not link the C++ engine in-process.
 

@@ -50,6 +50,8 @@ void Engine::on_device_invalidated() {
 EngineDiagnostics Engine::diagnostics() const {
   EngineDiagnostics d;
   d.state = state();
+  d.broadcast = broadcast_state();
+  d.live_destination_ready = live_destination_ready();
   d.frames_rendered = frames_rendered_.load(std::memory_order_relaxed);
   d.xruns = xruns_.load(std::memory_order_relaxed);
   d.underruns = underruns_.load(std::memory_order_relaxed);
@@ -66,6 +68,24 @@ EngineDiagnostics Engine::diagnostics() const {
 
 std::vector<DeviceInfo> Engine::list_capture_devices() const { return devices_.list_capture(); }
 std::vector<DeviceInfo> Engine::list_render_devices() const { return devices_.list_render(); }
+
+std::vector<SourceInfo> Engine::list_sources() const {
+  std::vector<SourceInfo> out;
+  for (uint32_t i = 0; i < kMaxSources; ++i) {
+    if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
+    SourceInfo info;
+    info.id = slots_[i].id.load(std::memory_order_relaxed);
+    info.kind = static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed));
+    info.name = slots_[i].name;
+    info.gain = slots_[i].gain.load(std::memory_order_relaxed);
+    info.mute = slots_[i].mute.load(std::memory_order_relaxed);
+    info.monitor = slots_[i].monitor.load(std::memory_order_relaxed);
+    info.broadcast = slots_[i].broadcast.load(std::memory_order_relaxed);
+    info.process_id = slots_[i].process_id.load(std::memory_order_relaxed);
+    out.push_back(std::move(info));
+  }
+  return out;
+}
 
 bool Engine::set_monitor_device(const std::wstring& device_id, std::string& error) {
   std::lock_guard<std::mutex> lock(control_mu_);
@@ -275,6 +295,33 @@ MeterSnapshot Engine::source_meter(uint32_t id) {
   return {};
 }
 MeterSnapshot Engine::master_meter() { return master_meter_.snapshot_and_reset(); }
+MeterSnapshot Engine::broadcast_meter() { return broadcast_meter_.snapshot_and_reset(); }
+
+void Engine::set_live_destination_ready(bool ready) {
+  live_destination_ready_.store(ready, std::memory_order_release);
+  if (!ready) {
+    broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
+  }
+}
+
+bool Engine::enable_broadcast(std::string& error) {
+  if (!live_destination_ready()) {
+    error = "no_live_destination";
+    broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
+    return false;
+  }
+  const auto st = state();
+  if (st != EngineState::Running && st != EngineState::Starting) {
+    error = "engine_not_running";
+    return false;
+  }
+  broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Live), std::memory_order_release);
+  return true;
+}
+
+void Engine::disable_broadcast() {
+  broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
+}
 
 bool Engine::render_fill_thunk(void* user, float* dst, uint32_t frames) {
   return static_cast<Engine*>(user)->render_fill(dst, frames);
@@ -291,6 +338,7 @@ bool Engine::render_fill(float* dst, uint32_t frames) {
   float* bc = scratch_broadcast_.data();
   graph_.process(slots_, frames, mon, bc, master_gain_.load(std::memory_order_relaxed), true);
   master_meter_.accumulate(mon, frames, kEngineChannels);
+  broadcast_meter_.accumulate(bc, frames, kEngineChannels);
   frames_rendered_.fetch_add(frames, std::memory_order_relaxed);
 
   // Count underruns roughly: if any active capture ring was empty-ish — skipped for now.
@@ -306,8 +354,7 @@ bool Engine::render_fill(float* dst, uint32_t frames) {
 bool Engine::start(std::string& error) {
   std::lock_guard<std::mutex> lock(control_mu_);
   if (state() == EngineState::Running || state() == EngineState::Starting) {
-    error = "already running";
-    return false;
+    return true;  // idempotent — Go Live must not own this path
   }
   set_state(EngineState::Starting);
   stop_render_.store(false);
@@ -359,6 +406,7 @@ bool Engine::start(std::string& error) {
 }
 
 void Engine::stop() {
+  disable_broadcast();
   stop_render_.store(true, std::memory_order_release);
   if (render_thread_.joinable()) render_thread_.join();
   monitor_sink_.close();

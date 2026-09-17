@@ -37,7 +37,26 @@ Identity: modern neon broadcast studio + restrained retro radio control room.
 
 Monitor and Live/Broadcast are independent first-class routes.
 
-## Future (documented, not Phase 3)
+## Engine vs Live state (locked)
+
+These are **not** the same:
+
+```text
+engine:    offline | starting | running | recovering | failed
+broadcast: standby | live
+```
+
+- **Standby does not stop the engine.** Monitoring, meters, FX, and level work continue.
+- **Go Live** enables the broadcast path only. It is never an alias for engine start.
+- **Standby** (from On Air) disables broadcast only. It is never an alias for engine stop.
+- Do not show **On Air** unless a real live destination is ready and broadcast is enabled.
+- Engine start/stop belong in Advanced / Diagnostics, not the primary surface.
+
+## Icon language (locked)
+
+Obvious universal symbols replace unnecessary words: `+` add, trash remove, gear advanced, mute, headphones monitor, broadcast/live route.
+
+## Future (documented, not Phase 4)
 
 - **MixBridge Send VST3** for DAW insert sends
 - Built-in fun starter instruments (original, MIT-clean; Vital/Helm are research only)

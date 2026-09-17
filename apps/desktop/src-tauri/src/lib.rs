@@ -16,6 +16,8 @@ struct EngineClient {
 #[derive(Serialize)]
 struct StatusDto {
   state: String,
+  broadcast: String,
+  live_dest: bool,
   raw: String,
 }
 
@@ -31,7 +33,30 @@ struct IdDto {
   id: u32,
 }
 
-fn pipe_command(cmd: &str) -> Result<String, String> {
+#[derive(Serialize, Clone)]
+struct DeviceDto {
+  id: String,
+  name: String,
+}
+
+#[derive(Serialize, Clone)]
+struct ProcessDto {
+  pid: u32,
+  name: String,
+}
+
+#[derive(Serialize, Clone)]
+struct SourceDto {
+  id: u32,
+  kind: String,
+  name: String,
+  gain: f32,
+  mute: bool,
+  monitor: bool,
+  broadcast: bool,
+}
+
+fn open_pipe() -> Result<(std::fs::File, BufReader<std::fs::File>), String> {
   #[cfg(windows)]
   {
     use std::fs::OpenOptions;
@@ -42,14 +67,9 @@ fn pipe_command(cmd: &str) -> Result<String, String> {
         .write(true)
         .open(r"\\.\pipe\mixbridge-engine")
       {
-        Ok(mut pipe) => {
-          let mut reader = BufReader::new(pipe.try_clone().map_err(|e| e.to_string())?);
-          let mut hello = String::new();
-          reader.read_line(&mut hello).map_err(|e| e.to_string())?;
-          writeln!(pipe, "{cmd}").map_err(|e| e.to_string())?;
-          let mut resp = String::new();
-          reader.read_line(&mut resp).map_err(|e| e.to_string())?;
-          return Ok(resp.trim().to_string());
+        Ok(pipe) => {
+          let reader = BufReader::new(pipe.try_clone().map_err(|e| e.to_string())?);
+          return Ok((pipe, reader));
         }
         Err(e) => {
           last_err = e.to_string();
@@ -61,8 +81,68 @@ fn pipe_command(cmd: &str) -> Result<String, String> {
   }
   #[cfg(not(windows))]
   {
-    let _ = cmd;
     Err("Windows only".into())
+  }
+}
+
+fn pipe_command(cmd: &str) -> Result<String, String> {
+  let (mut pipe, mut reader) = open_pipe()?;
+  let mut hello = String::new();
+  reader.read_line(&mut hello).map_err(|e| e.to_string())?;
+  writeln!(pipe, "{cmd}").map_err(|e| e.to_string())?;
+  let mut resp = String::new();
+  reader.read_line(&mut resp).map_err(|e| e.to_string())?;
+  Ok(resp.trim().to_string())
+}
+
+fn pipe_command_until_end(cmd: &str) -> Result<Vec<String>, String> {
+  let (mut pipe, mut reader) = open_pipe()?;
+  let mut hello = String::new();
+  reader.read_line(&mut hello).map_err(|e| e.to_string())?;
+  writeln!(pipe, "{cmd}").map_err(|e| e.to_string())?;
+  let mut lines = Vec::new();
+  loop {
+    let mut resp = String::new();
+    reader.read_line(&mut resp).map_err(|e| e.to_string())?;
+    let t = resp.trim().to_string();
+    if t.is_empty() {
+      break;
+    }
+    let done = t == "OK END" || t.starts_with("ERR ");
+    lines.push(t);
+    if done {
+      break;
+    }
+  }
+  Ok(lines)
+}
+
+fn parse_field<'a>(parts: &[&'a str], key: &str) -> Option<&'a str> {
+  parts
+    .iter()
+    .position(|t| *t == key)
+    .and_then(|i| parts.get(i + 1).copied())
+}
+
+fn parse_meter(raw: &str) -> MeterDto {
+  let parts: Vec<&str> = raw.split_whitespace().collect();
+  MeterDto {
+    peak: parse_field(&parts, "PEAK")
+      .and_then(|s| s.parse().ok())
+      .unwrap_or(0.0),
+    rms: parse_field(&parts, "RMS")
+      .and_then(|s| s.parse().ok())
+      .unwrap_or(0.0),
+    clip: parse_field(&parts, "CLIP") == Some("1"),
+  }
+}
+
+fn parse_id(raw: &str) -> Result<IdDto, String> {
+  let parts: Vec<&str> = raw.split_whitespace().collect();
+  if let Some(id) = parse_field(&parts, "ID").and_then(|s| s.parse().ok()) {
+    Ok(IdDto { id })
+  } else {
+    Err(raw.to_string())
   }
 }
 
@@ -114,6 +194,16 @@ fn force_respawn(app: &tauri::AppHandle) -> Result<(), String> {
   ensure_engine_process(app)
 }
 
+fn ensure_running(app: &tauri::AppHandle) -> Result<(), String> {
+  ensure_engine_process(app)?;
+  let raw = pipe_command("START")?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
 #[tauri::command]
 fn engine_status(app: tauri::AppHandle) -> Result<StatusDto, String> {
   ensure_engine_process(&app)?;
@@ -124,46 +214,46 @@ fn engine_status(app: tauri::AppHandle) -> Result<StatusDto, String> {
       pipe_command("STATUS")?
     }
   };
-  let state = raw
-    .split_whitespace()
-    .skip_while(|t| *t != "STATE")
-    .nth(1)
-    .unwrap_or("unknown")
+  let parts: Vec<&str> = raw.split_whitespace().collect();
+  let state = parse_field(&parts, "STATE").unwrap_or("unknown").to_string();
+  let broadcast = parse_field(&parts, "BROADCAST")
+    .unwrap_or("standby")
     .to_string();
-  Ok(StatusDto { state, raw })
+  let live_dest = parse_field(&parts, "LIVE_DEST") == Some("1");
+  Ok(StatusDto {
+    state,
+    broadcast,
+    live_dest,
+    raw,
+  })
+}
+
+#[tauri::command]
+fn engine_ensure_running(app: tauri::AppHandle) -> Result<(), String> {
+  ensure_running(&app)
 }
 
 #[tauri::command]
 fn engine_meter(app: tauri::AppHandle) -> Result<MeterDto, String> {
   ensure_engine_process(&app)?;
-  let raw = pipe_command("METER_MASTER")?;
-  let mut peak = 0.0f32;
-  let mut rms = 0.0f32;
-  let mut clip = false;
-  let parts: Vec<&str> = raw.split_whitespace().collect();
-  for i in 0..parts.len() {
-    if parts[i] == "PEAK" && i + 1 < parts.len() {
-      peak = parts[i + 1].parse().unwrap_or(0.0);
-    }
-    if parts[i] == "RMS" && i + 1 < parts.len() {
-      rms = parts[i + 1].parse().unwrap_or(0.0);
-    }
-    if parts[i] == "CLIP" && i + 1 < parts.len() {
-      clip = parts[i + 1] == "1";
-    }
-  }
-  Ok(MeterDto { peak, rms, clip })
+  Ok(parse_meter(&pipe_command("METER_MASTER")?))
+}
+
+#[tauri::command]
+fn engine_meter_broadcast(app: tauri::AppHandle) -> Result<MeterDto, String> {
+  ensure_engine_process(&app)?;
+  Ok(parse_meter(&pipe_command("METER_BROADCAST")?))
+}
+
+#[tauri::command]
+fn engine_meter_source(app: tauri::AppHandle, id: u32) -> Result<MeterDto, String> {
+  ensure_engine_process(&app)?;
+  Ok(parse_meter(&pipe_command(&format!("METER_SOURCE {id}"))?))
 }
 
 #[tauri::command]
 fn engine_start(app: tauri::AppHandle) -> Result<(), String> {
-  ensure_engine_process(&app)?;
-  let raw = pipe_command("START")?;
-  if raw.starts_with("OK") {
-    Ok(())
-  } else {
-    Err(raw)
-  }
+  ensure_running(&app)
 }
 
 #[tauri::command]
@@ -178,9 +268,9 @@ fn engine_stop(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn engine_restart(app: tauri::AppHandle) -> Result<(), String> {
-  ensure_engine_process(&app)?;
-  let raw = pipe_command("RESTART")?;
+fn broadcast_enable(app: tauri::AppHandle) -> Result<(), String> {
+  ensure_running(&app)?;
+  let raw = pipe_command("BROADCAST_ENABLE")?;
   if raw.starts_with("OK") {
     Ok(())
   } else {
@@ -189,11 +279,134 @@ fn engine_restart(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn engine_add_tone(app: tauri::AppHandle, hz: f32) -> Result<IdDto, String> {
+fn broadcast_disable(app: tauri::AppHandle) -> Result<(), String> {
   ensure_engine_process(&app)?;
-  let raw = pipe_command(&format!("ADD_TONE {hz}"))?;
-  if let Some(id) = raw.split_whitespace().last().and_then(|s| s.parse().ok()) {
-    Ok(IdDto { id })
+  let raw = pipe_command("BROADCAST_DISABLE")?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_list_capture(app: tauri::AppHandle) -> Result<Vec<DeviceDto>, String> {
+  ensure_engine_process(&app)?;
+  let lines = pipe_command_until_end("LIST_CAPTURE")?;
+  let mut out = Vec::new();
+  for line in lines {
+    if !line.starts_with("DEVICE ") {
+      continue;
+    }
+    if let Some(rest) = line.strip_prefix("DEVICE ID ") {
+      if let Some((id, name)) = rest.split_once(" NAME ") {
+        out.push(DeviceDto {
+          id: id.to_string(),
+          name: name.to_string(),
+        });
+      }
+    }
+  }
+  Ok(out)
+}
+
+#[tauri::command]
+fn engine_list_processes(app: tauri::AppHandle) -> Result<Vec<ProcessDto>, String> {
+  ensure_engine_process(&app)?;
+  let lines = pipe_command_until_end("LIST_PROCESSES")?;
+  let mut out = Vec::new();
+  for line in lines {
+    if !line.starts_with("PROCESS ") {
+      continue;
+    }
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    let pid = parse_field(&parts, "PID")
+      .and_then(|s| s.parse().ok())
+      .unwrap_or(0);
+    let name = if let Some(i) = parts.iter().position(|t| *t == "NAME") {
+      parts[i + 1..].join(" ")
+    } else {
+      String::new()
+    };
+    if pid > 0 && !name.is_empty() {
+      out.push(ProcessDto { pid, name });
+    }
+  }
+  Ok(out)
+}
+
+#[tauri::command]
+fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> {
+  ensure_engine_process(&app)?;
+  let lines = pipe_command_until_end("LIST_SOURCES")?;
+  let mut out = Vec::new();
+  for line in lines {
+    if !line.starts_with("SOURCE ") {
+      continue;
+    }
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    let id = parse_field(&parts, "ID")
+      .and_then(|s| s.parse().ok())
+      .unwrap_or(0);
+    let kind = parse_field(&parts, "KIND").unwrap_or("unknown").to_string();
+    let name = if let Some(i) = parts.iter().position(|t| *t == "NAME") {
+      // NAME ... GAIN
+      let mut end = parts.len();
+      for (j, t) in parts.iter().enumerate().skip(i + 1) {
+        if *t == "GAIN" {
+          end = j;
+          break;
+        }
+      }
+      parts[i + 1..end].join(" ")
+    } else {
+      String::new()
+    };
+    let gain = parse_field(&parts, "GAIN")
+      .and_then(|s| s.parse().ok())
+      .unwrap_or(1.0);
+    let mute = parse_field(&parts, "MUTE") == Some("1");
+    let monitor = parse_field(&parts, "MONITOR") != Some("0");
+    let broadcast = parse_field(&parts, "BROADCAST") != Some("0");
+    if id > 0 {
+      out.push(SourceDto {
+        id,
+        kind,
+        name,
+        gain,
+        mute,
+        monitor,
+        broadcast,
+      });
+    }
+  }
+  Ok(out)
+}
+
+#[tauri::command]
+fn engine_add_physical(app: tauri::AppHandle, device_id: String) -> Result<IdDto, String> {
+  ensure_running(&app)?;
+  parse_id(&pipe_command(&format!("ADD_PHYSICAL {device_id}"))?)
+}
+
+#[tauri::command]
+fn engine_add_process(app: tauri::AppHandle, pid: u32, name: String) -> Result<IdDto, String> {
+  ensure_running(&app)?;
+  parse_id(&pipe_command(&format!("ADD_PROCESS {pid} {name}"))?)
+}
+
+#[tauri::command]
+fn engine_add_tone(app: tauri::AppHandle, hz: f32) -> Result<IdDto, String> {
+  ensure_running(&app)?;
+  parse_id(&pipe_command(&format!("ADD_TONE {hz}"))?)
+}
+
+#[tauri::command]
+fn engine_remove_source(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("REMOVE {id}"))?;
+  if raw.starts_with("OK") {
+    Ok(())
   } else {
     Err(raw)
   }
@@ -221,19 +434,59 @@ fn engine_set_mute(app: tauri::AppHandle, id: u32, mute: bool) -> Result<(), Str
   }
 }
 
+#[tauri::command]
+fn engine_set_monitor(app: tauri::AppHandle, id: u32, enabled: bool) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!(
+    "SET_MONITOR {id} {}",
+    if enabled { 1 } else { 0 }
+  ))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_set_broadcast(app: tauri::AppHandle, id: u32, enabled: bool) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!(
+    "SET_BROADCAST {id} {}",
+    if enabled { 1 } else { 0 }
+  ))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .invoke_handler(tauri::generate_handler![
       engine_status,
+      engine_ensure_running,
       engine_meter,
+      engine_meter_broadcast,
+      engine_meter_source,
       engine_start,
       engine_stop,
-      engine_restart,
+      broadcast_enable,
+      broadcast_disable,
+      engine_list_capture,
+      engine_list_processes,
+      engine_list_sources,
+      engine_add_physical,
+      engine_add_process,
       engine_add_tone,
+      engine_remove_source,
       engine_set_gain,
-      engine_set_mute
+      engine_set_mute,
+      engine_set_monitor,
+      engine_set_broadcast
     ])
     .run(tauri::generate_context!())
     .expect("error while running MixBridge");

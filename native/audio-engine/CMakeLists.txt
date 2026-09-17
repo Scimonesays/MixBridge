@@ -34,6 +34,9 @@ target_link_libraries(mb-engine-soak PRIVATE mixbridge_engine_core)
 
 add_executable(mb-engine-ipc tools/engine_ipc_server.cpp)
 target_link_libraries(mb-engine-ipc PRIVATE mixbridge_engine_core)
+if(WIN32)
+  target_link_libraries(mb-engine-ipc PRIVATE user32)
+endif()
 
 enable_testing()
 add_executable(engine_graph_test tests/graph_test.cpp)
@@ -43,3 +46,7 @@ add_test(NAME engine_graph_test COMMAND engine_graph_test)
 add_executable(engine_mix_analyze_test tests/mix_analyze_test.cpp)
 target_link_libraries(engine_mix_analyze_test PRIVATE mixbridge_engine_core)
 add_test(NAME engine_mix_analyze_test COMMAND engine_mix_analyze_test)
+
+add_executable(engine_phase41_state_test tests/phase41_state_test.cpp)
+target_link_libraries(engine_phase41_state_test PRIVATE mixbridge_engine_core)
+add_test(NAME engine_phase41_state_test COMMAND engine_phase41_state_test)

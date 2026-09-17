@@ -1,47 +1,41 @@
-﻿# MixBridge QA — Phase 3 complete
+﻿# MixBridge QA — Phase 4.1 progress
 
-Date: 2026-09-17T23:05:00Z
+Date: 2026-09-17T23:25:00Z
 
-## Machine
+## Phase 3
 
-| Field | Value |
-|-------|-------|
-| OS | Windows 11 25H2 build 26200 x64 |
-| Audio | RME Fireface UC (capture 1+2 / render Speakers) |
-| Engine format | 48 kHz float32 stereo |
-| Observed device rate | 44100 Hz (shared WASAPI + autoconvert) |
-| Buffer frames | 970 |
-| Estimated latency | ~22 ms |
-| WDK | not installed (driver packaging blocked; not a Phase 3 stop) |
+Gates 3.1–3.12 remain **PASS** (not reopened).
 
-## Phase 3 gates
+## Phase 4.1 checklist
 
-| Gate | Description | Status | Evidence |
-|------|-------------|--------|----------|
-| 3.1 | Physical WASAPI source | **PASS** | `mb-engine-harness` physical_source on Fireface 1+2 |
-| 3.2 | Render/monitor endpoint | **PASS** | Fireface Speakers; frames_rendered advancing |
-| 3.3 | Process capture in engine | **PASS** | `mb-tone-player` → process_source; has1000=1 |
-| 3.4 | Two simultaneous sources | **PASS** | physical + process + ref 440 mixed |
-| 3.5 | Deterministic dual-tone analysis | **PASS** | tap has440=1 has1000=1; ctest mix_analyze |
-| 3.6 | Gain verified | **PASS** | `engine_mix_analyze_test` ~0.5 ratio |
-| 3.7 | Mute verified | **PASS** | mute A/B frequency disappearance |
-| 3.8 | Meters non-blocking | **PASS** | AtomicMeter snapshots; IPC METER_MASTER |
-| 3.9 | Device loss no crash | **PASS** | IMMNotificationClient → recovering/device_missing; no AV on physical AddRef fix |
-| 3.10 | 30-minute soak | **PASS** | Maintainer accept; ticks xruns=0, WS ~11.8 MB; see `logs/soak-30min-ACCEPTANCE.md` |
-| 3.11 | IPC start/stop/source | **PASS** | named pipe smoke: PING/ADD_TONE/START/METER/STOP |
-| 3.12 | Tauri shell live meter | **PASS** | `prove-phase312-ipc.ps1` PASS; `npm run tauri -- dev` builds and runs `mixbridge-desktop.exe` |
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Engine remains running in Standby | **PASS** | `prove-phase41-ipc.ps1`; STATUS STATE running + BROADCAST standby |
+| 2 | Standby monitoring path stays active | **PASS** | START then BROADCAST_ENABLE fails; engine stays running |
+| 3 | Go Live ≠ engine lifecycle | **PASS** | BROADCAST_ENABLE / DISABLE; START/STOP independent |
+| 4 | No On Air without live destination | **PASS** | LIVE_DEST 0; BROADCAST_ENABLE → `no_live_destination` |
+| 5 | `+` opens source picker | **PASS** | UI: Input / Application choices (desktop shell) |
+| 6 | Physical input via picker/IPC | **PASS** | ADD_PHYSICAL → OK ID; LIST_CAPTURE ID+NAME |
+| 7 | Application list via IPC | **PASS** | LIST_PROCESSES implemented (visible-window apps) |
+| 8 | Two source cards coexist | **PASS** | multi-source Map UI + LIST_SOURCES |
+| 9–11 | Independent meter/gain/mute | **PASS** | per-id METER_SOURCE / SET_GAIN / SET_MUTE; remove preserves peer mute |
+| 12 | Trash removes only selected | **PASS** | REMOVE + phase41_state_test |
+| 13 | Tone not user-facing `+` | **PASS** | `+` → picker only; ADD_TONE diagnostics/IPC only |
+| 14–15 | Offline UI fonts | **PASS** | Google Fonts removed; system Segoe UI Variable |
+| 16 | A11y meter not aria-hidden | **PASS** | master meter outside aria-hidden ancestor |
+| 17 | No helper prose | **PASS** | identity/state only |
 
 ## Commands
 
 ```text
-cmake --build native/audio-engine/build
 ctest --test-dir native/audio-engine/build --output-on-failure
-native/audio-engine/build/mb-engine-harness.exe --seconds 2
-native/audio-engine/build/mb-engine-soak.exe --minutes 2
-powershell -File scripts/prove-phase312-ipc.ps1
-cd apps/desktop; npm run tauri -- dev
+powershell -File scripts/prove-phase41-ipc.ps1
 ```
 
-## Phase 3 close
+## Remaining Phase 4+ gaps
 
-All twelve Phase 3 gates are **PASS**. Product-level 10/10 acceptance still requires later phases (VST3, virtual out, packaging).
+- Real Live destination (Phase 6 virtual output) before On Air can activate
+- Application picker icons (names only today)
+- Session/preset persistence
+- VST3 hosting (Phase 5)
+- Packaging / final acceptance matrix

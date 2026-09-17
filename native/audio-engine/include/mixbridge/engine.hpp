@@ -49,6 +49,7 @@ public:
   EngineDiagnostics diagnostics() const;
   std::vector<DeviceInfo> list_capture_devices() const;
   std::vector<DeviceInfo> list_render_devices() const;
+  std::vector<SourceInfo> list_sources() const;
 
   // Select monitor render device (empty = default). Call before start.
   bool set_monitor_device(const std::wstring& device_id, std::string& error);
@@ -69,10 +70,23 @@ public:
 
   MeterSnapshot source_meter(uint32_t id);
   MeterSnapshot master_meter();
+  MeterSnapshot broadcast_meter();
 
-  // Start/stop realtime monitor mix.
+  // Monitor path lifecycle (not Go Live). Idempotent start.
   bool start(std::string& error);
   void stop();
+
+  // Broadcast path — independent of engine running. Requires a real live destination.
+  BroadcastState broadcast_state() const {
+    return static_cast<BroadcastState>(broadcast_state_.load(std::memory_order_acquire));
+  }
+  bool live_destination_ready() const {
+    return live_destination_ready_.load(std::memory_order_acquire);
+  }
+  // Dev/Phase-6 only. Production must not fake a destination.
+  void set_live_destination_ready(bool ready);
+  bool enable_broadcast(std::string& error);
+  void disable_broadcast();
 
   // Offline/test: mix tone/fixture rings into buffers without WASAPI (unit tests).
   void render_offline(uint32_t frames, float* monitor, float* broadcast);
@@ -99,8 +113,11 @@ private:
 
   MixGraph graph_;
   AtomicMeter master_meter_;
+  AtomicMeter broadcast_meter_;
 
   std::atomic<uint32_t> state_{static_cast<uint32_t>(EngineState::Stopped)};
+  std::atomic<uint32_t> broadcast_state_{static_cast<uint32_t>(BroadcastState::Standby)};
+  std::atomic<bool> live_destination_ready_{false};
   std::atomic<uint64_t> frames_rendered_{0};
   std::atomic<uint64_t> xruns_{0};
   std::atomic<uint64_t> underruns_{0};

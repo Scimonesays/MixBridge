@@ -21,6 +21,18 @@ See `artifacts/qa/latest/SUMMARY.md` for measured evidence.
 | 3.11 IPC | PASS |
 | 3.12 Tauri live meter | PASS (IPC live-control proof + Tauri `dev` run) |
 
+## Phase 4.1 product semantics
+
+| Gate | Status |
+|------|--------|
+| Engine ≠ broadcast state | PASS |
+| Go Live blocked without live dest | PASS |
+| Source picker Input/Application | PASS |
+| Multi-source + REMOVE | PASS |
+| Offline system fonts | PASS |
+
+See `artifacts/qa/latest/SUMMARY.md`.
+
 ## Product gates (overall)
 
 | Gate | Description | Status |

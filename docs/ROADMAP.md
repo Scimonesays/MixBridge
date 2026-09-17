@@ -13,13 +13,13 @@ Enumerate, capture, render, system loopback, process loopback, deterministic DSP
 Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, soak harness, Tauri shell. **Complete — gates 3.1–3.12 PASS** (`artifacts/qa/latest/SUMMARY.md`).
 
 ## Phase 4 — UI shell
-Icon-first product shell: Sources → Mix → Outputs, Go Live / On Air, independent Monitor/Live routes, no helper prose. **Started** (desktop shell doctrine pass).
+Icon-first product shell: Sources → Mix → Outputs; engine vs broadcast state separated; real source picker (Input / Application); multi-source cards. **Phase 4.1 complete** — On Air awaits Phase 6 live destination.
 
 ## Phase 5 — VST3
-Scan/cache/load/editor/bypass/state + quarantine.
+Scan/cache/load/editor/bypass/state + quarantine. **Next.**
 
 ## Phase 6 — Virtual output
-MixBridge VAD + fallbacks; end-to-end virtual mic analysis.
+MixBridge Output endpoint; enables real On Air / Discord path. **Required for broadcast Live.**
 
 ## Phase 7 — Product UX
 Icon-first home screen, source picker, presets, first-run.

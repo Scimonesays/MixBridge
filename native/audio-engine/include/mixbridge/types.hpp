@@ -20,6 +20,12 @@ enum class EngineState : uint32_t {
   Failed = 5,
 };
 
+// Independent of EngineState. Standby keeps monitoring; Live enables broadcast sink.
+enum class BroadcastState : uint32_t {
+  Standby = 0,
+  Live = 1,
+};
+
 inline const char* engine_state_name(EngineState s) {
   switch (s) {
     case EngineState::Stopped: return "stopped";
@@ -28,6 +34,14 @@ inline const char* engine_state_name(EngineState s) {
     case EngineState::Recovering: return "recovering";
     case EngineState::DeviceMissing: return "device_missing";
     case EngineState::Failed: return "failed";
+  }
+  return "unknown";
+}
+
+inline const char* broadcast_state_name(BroadcastState s) {
+  switch (s) {
+    case BroadcastState::Standby: return "standby";
+    case BroadcastState::Live: return "live";
   }
   return "unknown";
 }
@@ -53,6 +67,8 @@ struct MeterSnapshot {
 
 struct EngineDiagnostics {
   EngineState state = EngineState::Stopped;
+  BroadcastState broadcast = BroadcastState::Standby;
+  bool live_destination_ready = false;
   uint64_t frames_rendered = 0;
   uint64_t xruns = 0;
   uint64_t underruns = 0;
@@ -61,6 +77,17 @@ struct EngineDiagnostics {
   uint32_t device_rate = 0;
   uint32_t engine_rate = kEngineRate;
   double estimated_latency_ms = 0.0;
+};
+
+struct SourceInfo {
+  uint32_t id = 0;
+  SourceKind kind = SourceKind::ToneFixture;
+  std::string name;
+  float gain = 1.0f;
+  bool mute = false;
+  bool monitor = true;
+  bool broadcast = true;
+  uint32_t process_id = 0;
 };
 
 }  // namespace mixbridge
