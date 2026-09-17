@@ -1,9 +1,13 @@
 const airBadge = document.getElementById("air-badge");
 const meterEl = document.getElementById("meter");
 const sourceMeterEl = document.getElementById("source-meter");
+const monitorMeterEl = document.getElementById("monitor-meter");
+const liveMeterEl = document.getElementById("live-meter");
+const liveRoute = document.getElementById("live-route");
 const sourceCard = document.getElementById("source-card");
 const statusEl = document.getElementById("status");
 const btnLive = document.getElementById("btn-live");
+const liveLabel = document.getElementById("live-label");
 const btnMute = document.getElementById("btn-mute");
 
 let sourceId = null;
@@ -14,15 +18,29 @@ function showError(msg) {
   statusEl.textContent = msg || "";
 }
 
+function setMeter(el, peak, vertical) {
+  const pct = Math.min(100, Math.round((peak || 0) * 140));
+  if (vertical) {
+    el.style.height = `${pct}%`;
+    el.style.width = "100%";
+  } else {
+    el.style.width = `${pct}%`;
+  }
+  return pct;
+}
+
 function setAirVisual(live) {
   onAir = live;
   airBadge.textContent = live ? "On Air" : "Standby";
   airBadge.classList.toggle("on-air", live);
-  btnLive.textContent = live ? "ON AIR" : "GO LIVE";
+  airBadge.classList.remove("offline");
   btnLive.classList.toggle("standby", !live);
   btnLive.setAttribute("aria-pressed", live ? "true" : "false");
-  btnLive.setAttribute("aria-label", live ? "Go to Standby" : "Go Live");
+  btnLive.setAttribute("aria-label", live ? "Standby" : "Go Live");
   btnLive.title = live ? "Standby" : "Go Live";
+  liveLabel.textContent = live ? "On Air" : "Go Live";
+  liveRoute.classList.toggle("dim", !live);
+  liveRoute.classList.toggle("live-active", live);
 }
 
 async function invoke(cmd, args = {}) {
@@ -39,14 +57,18 @@ async function refreshStatus() {
     const running = (s.state || "").toLowerCase() === "running";
     setAirVisual(running);
     const m = await invoke("engine_meter");
-    const pct = Math.min(100, Math.round((m.peak || 0) * 140));
-    meterEl.style.width = `${pct}%`;
+    const peak = m.peak || 0;
+    const pct = setMeter(meterEl, peak, true);
     meterEl.setAttribute("aria-valuenow", String(pct));
-    sourceMeterEl.style.width = `${pct}%`;
+    setMeter(sourceMeterEl, peak, false);
+    setMeter(monitorMeterEl, peak, false);
+    setMeter(liveMeterEl, running ? peak : 0, false);
     showError("");
   } catch (e) {
     setAirVisual(false);
     airBadge.textContent = "Offline";
+    airBadge.classList.add("offline");
+    airBadge.classList.remove("on-air");
     showError(String(e));
   }
 }

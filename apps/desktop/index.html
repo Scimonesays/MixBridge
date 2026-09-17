@@ -5,57 +5,83 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MixBridge</title>
     <link rel="icon" type="image/png" href="/src/assets/branding/mixbridge-logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <div id="app">
       <header class="top">
-        <img class="logo" src="/src/assets/branding/mixbridge-logo.png" alt="MixBridge" width="40" height="40" />
+        <div class="brand">
+          <img class="logo" src="/src/assets/branding/mixbridge-logo.png" alt="MixBridge" width="48" height="48" />
+          <span class="wordmark" aria-hidden="true">MixBridge</span>
+        </div>
         <span id="air-badge" class="badge" title="Broadcast state" aria-live="polite">Standby</span>
       </header>
 
       <main class="flow" aria-label="Sources mix outputs">
-        <section class="col" aria-label="Sources">
-          <h2 class="col-title">Sources</h2>
-          <div id="source-card" class="source-card" hidden>
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="currentColor" d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12z"/>
-            </svg>
-            <div class="meter-wrap" aria-hidden="true"><div id="source-meter" class="meter"></div></div>
-            <div class="source-actions">
-              <button id="btn-mute" class="icon-btn" title="Mute" aria-label="Mute" aria-pressed="false">
-                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 9v6h4l5 5V4L9 9H5zm12.5 3a4.5 4.5 0 0 0-2.5-4.03v8.06A4.5 4.5 0 0 0 17.5 12z"/></svg>
-              </button>
-              <input id="gain" type="range" min="0" max="200" value="100" title="Level" aria-label="Level" />
+        <section class="col sources" aria-labelledby="lbl-sources">
+          <h2 id="lbl-sources" class="col-title">Sources</h2>
+          <div id="source-list" class="stack">
+            <div id="source-card" class="source-card" hidden>
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12z"/>
+              </svg>
+              <div class="meter-wrap" aria-hidden="true"><div id="source-meter" class="meter"></div></div>
+              <div class="source-actions">
+                <button id="btn-mute" class="icon-btn" type="button" title="Mute" aria-label="Mute" aria-pressed="false">
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 9v6h4l5 5V4L9 9H5zm12.5 3a4.5 4.5 0 0 0-2.5-4.03v8.06A4.5 4.5 0 0 0 17.5 12z"/></svg>
+                </button>
+                <input id="gain" type="range" min="0" max="200" value="100" title="Level" aria-label="Level" />
+              </div>
             </div>
           </div>
           <div class="row-actions">
-            <button id="btn-add-tone" class="icon-btn" title="Add tone source" aria-label="Add tone source">
+            <button id="btn-add-tone" class="icon-btn" type="button" title="Add tone" aria-label="Add tone">
               <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
             </button>
           </div>
         </section>
 
-        <section class="mix-core" aria-label="Mix">
-          <h2 class="col-title">Mix</h2>
-          <div class="meter-wrap" style="width:140px" aria-label="Master meter">
-            <div id="meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+        <section class="mix-core" aria-labelledby="lbl-mix">
+          <h2 id="lbl-mix" class="col-title">Mix</h2>
+          <div class="master-ring" aria-hidden="true">
+            <div class="meter-wrap tall" aria-label="Master meter">
+              <div id="meter" class="meter vertical" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+            </div>
           </div>
-          <button id="btn-live" class="icon-btn live standby" title="Go Live" aria-label="Go Live" aria-pressed="false">GO LIVE</button>
+          <button id="btn-live" class="live-btn standby" type="button" title="Go Live" aria-label="Go Live" aria-pressed="false">
+            <svg class="live-glyph" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" fill="currentColor"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.6" d="M7.5 7.5a6.4 6.4 0 0 1 9 0M5 5a10 10 0 0 1 14 0"/>
+            </svg>
+            <span id="live-label" class="live-label">Go Live</span>
+          </button>
         </section>
 
-        <section class="col" aria-label="Outputs">
-          <h2 class="col-title">Outputs</h2>
-          <div class="dest-card">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="currentColor" d="M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h2v-8H5a7 7 0 0 1 14 0h-2v8h2a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z"/>
-            </svg>
-            <span class="col-title" style="margin:0">Monitor</span>
+        <section class="col outputs" aria-labelledby="lbl-outputs">
+          <h2 id="lbl-outputs" class="col-title">Outputs</h2>
+          <div class="stack">
+            <div class="dest-card" data-route="monitor" title="Monitor">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h2v-8H5a7 7 0 0 1 14 0h-2v8h2a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z"/>
+              </svg>
+              <span class="route-tag">Monitor</span>
+              <div class="meter-wrap thin" aria-hidden="true"><div id="monitor-meter" class="meter"></div></div>
+            </div>
+            <div id="live-route" class="dest-card dim" data-route="live" title="Live">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M4 10v4h3l5 4V6L7 10H4zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/>
+              </svg>
+              <span class="route-tag">Live</span>
+              <div class="meter-wrap thin" aria-hidden="true"><div id="live-meter" class="meter"></div></div>
+            </div>
           </div>
         </section>
       </main>
 
-      <p id="status" class="status" role="status"></p>
+      <p id="status" class="status" role="status" aria-live="assertive"></p>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
