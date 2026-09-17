@@ -16,7 +16,7 @@ Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, s
 Icon-first product shell: Sources → Mix → Outputs; engine vs broadcast state separated; real source picker (Input / Application); multi-source cards. **Phase 4.1 complete** — On Air awaits Phase 6 live destination.
 
 ## Phase 5 — VST3
-Scan/cache/load/editor/bypass/state + quarantine. **Next.**
+Filesystem scanner (`mb-vst3-scan`) done. Full load/editor/state awaits pinned VST3 SDK.
 
 ## Phase 6 — Virtual output
 - **6.1** Live WASAPI render destination (user-selected endpoint / virtual cable) — **done**; enables real On Air.
