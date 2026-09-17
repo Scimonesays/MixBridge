@@ -54,6 +54,11 @@ public:
   // Select monitor render device (empty = default). Call before start.
   bool set_monitor_device(const std::wstring& device_id, std::string& error);
 
+  // Select live/broadcast render device (empty clears). Enables live_destination_ready when set.
+  // Typical targets: user-installed virtual cable / future MixBridge Output. Not a fake Discord claim.
+  bool set_live_device(const std::wstring& device_id, std::string& error);
+  std::wstring live_device_id() const;
+
   // Graph control (non-realtime). Returns source id or 0 on failure.
   uint32_t add_physical_capture(const AddPhysicalRequest& req, std::string& error);
   uint32_t add_process_loopback(const AddProcessRequest& req, std::string& error);
@@ -76,14 +81,14 @@ public:
   bool start(std::string& error);
   void stop();
 
-  // Broadcast path — independent of engine running. Requires a real live destination.
+  // Broadcast path — independent of engine running. Requires a configured live render device.
   BroadcastState broadcast_state() const {
     return static_cast<BroadcastState>(broadcast_state_.load(std::memory_order_acquire));
   }
   bool live_destination_ready() const {
     return live_destination_ready_.load(std::memory_order_acquire);
   }
-  // Dev/Phase-6 only. Production must not fake a destination.
+  // Test helper only. Prefer set_live_device for product path.
   void set_live_destination_ready(bool ready);
   bool enable_broadcast(std::string& error);
   void disable_broadcast();
@@ -103,6 +108,9 @@ private:
   void free_slot(int index);
   static bool render_fill_thunk(void* user, float* dst, uint32_t frames);
   bool render_fill(float* dst, uint32_t frames);
+  static bool live_fill_thunk(void* user, float* dst, uint32_t frames);
+  bool live_fill(float* dst, uint32_t frames);
+  void stop_live_thread();
   void on_device_invalidated();
   void set_state(EngineState s);
 
@@ -110,6 +118,7 @@ private:
   SourceSlot slots_[kMaxSources];
   WasapiCaptureSource captures_[kMaxSources];
   WasapiRenderSink monitor_sink_;
+  WasapiRenderSink live_sink_;
 
   MixGraph graph_;
   AtomicMeter master_meter_;
@@ -126,8 +135,11 @@ private:
   std::atomic<uint32_t> next_id_{1};
 
   std::wstring monitor_device_id_;
+  std::wstring live_device_id_;
   std::thread render_thread_;
+  std::thread live_thread_;
   std::atomic<bool> stop_render_{false};
+  std::atomic<bool> stop_live_{true};
   std::string last_error_;
 
   // Preallocated realtime scratch (constructed at init size).
@@ -139,6 +151,7 @@ private:
   // Tap for analysis harness: lock-free SPSC; control thread drains.
   std::atomic<bool> tap_enabled_{false};
   SpscFloatRing tap_ring_{1u << 18};  // ~2.7s stereo @ 48k
+  SpscFloatRing live_ring_{1u << 16};  // broadcast → live sink
 
   std::mutex control_mu_;
 };

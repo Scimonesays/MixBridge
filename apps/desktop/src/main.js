@@ -3,6 +3,7 @@ const meterEl = document.getElementById("meter");
 const monitorMeterEl = document.getElementById("monitor-meter");
 const liveMeterEl = document.getElementById("live-meter");
 const liveRoute = document.getElementById("live-route");
+const liveRouteLabel = document.getElementById("live-route-label");
 const statusEl = document.getElementById("status");
 const btnLive = document.getElementById("btn-live");
 const liveLabel = document.getElementById("live-label");
@@ -16,6 +17,7 @@ const sources = new Map();
 
 let onAir = false;
 let liveDestReady = false;
+let liveDestName = "";
 let engineOnline = false;
 
 const ICON = {
@@ -58,6 +60,8 @@ function setAirVisual(live) {
   liveRoute.classList.toggle("dim", !live);
   liveRoute.classList.toggle("live-active", live);
   liveRoute.classList.toggle("unavailable", !liveDestReady);
+  liveRouteLabel.textContent = liveDestName || "Live";
+  liveRoute.title = liveDestName ? `Live · ${liveDestName}` : "Choose live output";
   // Do not fake Live availability.
   btnLive.disabled = false;
 }
@@ -274,6 +278,50 @@ async function showProcessList() {
     showError(String(e));
   }
 }
+
+async function showLiveOutputList() {
+  pickerRoot.className = "pick-list";
+  pickerRoot.innerHTML = `<button type="button" class="icon-btn tiny pick-back" title="Back" aria-label="Back">${ICON.back}</button>`;
+  pickerRoot.querySelector(".pick-back").addEventListener("click", closePicker);
+  try {
+    const devices = await invoke("engine_list_render");
+    for (const d of devices) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "pick-row";
+      row.title = d.name;
+      row.setAttribute("aria-label", d.name);
+      row.innerHTML = `${ICON.broadcast}<span>${d.name}</span>`;
+      row.addEventListener("click", async () => {
+        try {
+          await invoke("engine_set_live_device", { deviceId: d.id });
+          liveDestName = d.name;
+          liveDestReady = true;
+          liveRoute.classList.remove("unavailable");
+          closePicker();
+          showError("");
+          await refreshStatus();
+        } catch (e) {
+          showError(String(e));
+        }
+      });
+      pickerRoot.appendChild(row);
+    }
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+liveRoute.addEventListener("click", () => {
+  showLiveOutputList();
+  picker.showModal();
+});
+liveRoute.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" || ev.key === " ") {
+    ev.preventDefault();
+    liveRoute.click();
+  }
+});
 
 btnAdd.addEventListener("click", () => {
   openPickerRoot();

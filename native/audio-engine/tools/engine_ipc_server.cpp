@@ -172,6 +172,12 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
     } else if (cmd == "BROADCAST_DISABLE") {
       engine.disable_broadcast();
       write_line(pipe, "OK STANDBY");
+    } else if (cmd == "SET_LIVE_DEVICE") {
+      std::string id_utf8;
+      std::getline(iss >> std::ws, id_utf8);
+      while (!id_utf8.empty() && (id_utf8.back() == ' ' || id_utf8.back() == '\t')) id_utf8.pop_back();
+      if (engine.set_live_device(utf8_to_wide(id_utf8), err)) write_line(pipe, "OK LIVE_DEST");
+      else write_line(pipe, "ERR " + err);
     } else if (cmd == "ADD_TONE") {
       float hz = 440.0f;
       iss >> hz;

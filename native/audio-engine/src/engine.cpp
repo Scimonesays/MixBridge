@@ -25,6 +25,7 @@ bool Engine::init(std::string& error) {
 
 void Engine::shutdown() {
   stop();
+  stop_live_thread();
   for (uint32_t i = 0; i < kMaxSources; ++i) {
     captures_[i].stop();
     slots_[i].active.store(false);
@@ -96,6 +97,29 @@ bool Engine::set_monitor_device(const std::wstring& device_id, std::string& erro
   monitor_device_id_ = device_id;
   return true;
 }
+
+bool Engine::set_live_device(const std::wstring& device_id, std::string& error) {
+  if (device_id.empty()) {
+    stop_live_thread();
+    std::lock_guard<std::mutex> lock(control_mu_);
+    live_device_id_.clear();
+    live_destination_ready_.store(false, std::memory_order_release);
+    broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(control_mu_);
+  IMMDevice* device = devices_.open_by_id(device_id);
+  if (!device) {
+    error = "live render device not found";
+    return false;
+  }
+  device->Release();
+  live_device_id_ = device_id;
+  live_destination_ready_.store(true, std::memory_order_release);
+  return true;
+}
+
+std::wstring Engine::live_device_id() const { return live_device_id_; }
 
 int Engine::alloc_slot() {
   for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
@@ -300,8 +324,28 @@ MeterSnapshot Engine::broadcast_meter() { return broadcast_meter_.snapshot_and_r
 void Engine::set_live_destination_ready(bool ready) {
   live_destination_ready_.store(ready, std::memory_order_release);
   if (!ready) {
+    stop_live_thread();
     broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
   }
+}
+
+void Engine::stop_live_thread() {
+  stop_live_.store(true, std::memory_order_release);
+  if (live_thread_.joinable()) live_thread_.join();
+  live_sink_.close();
+  live_ring_.clear();
+}
+
+bool Engine::live_fill_thunk(void* user, float* dst, uint32_t frames) {
+  return static_cast<Engine*>(user)->live_fill(dst, frames);
+}
+
+bool Engine::live_fill(float* dst, uint32_t frames) {
+  const std::size_t want = static_cast<std::size_t>(frames) * kEngineChannels;
+  const std::size_t got = live_ring_.read(dst, want);
+  for (std::size_t i = got; i < want; ++i) dst[i] = 0.0f;
+  if (got < want) underruns_.fetch_add(1, std::memory_order_relaxed);
+  return true;
 }
 
 bool Engine::enable_broadcast(std::string& error) {
@@ -315,12 +359,46 @@ bool Engine::enable_broadcast(std::string& error) {
     error = "engine_not_running";
     return false;
   }
+
+  stop_live_thread();
+
+  std::wstring device_id;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (broadcast_state() == BroadcastState::Live) return true;
+    device_id = live_device_id_;
+    if (device_id.empty()) {
+      // Test helper: ready flag without sink.
+      broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Live), std::memory_order_release);
+      return true;
+    }
+  }
+
+  IMMDevice* device = devices_.open_by_id(device_id);
+  if (!device) {
+    error = "live render device missing";
+    return false;
+  }
+  if (!live_sink_.open(device, error)) {
+    device->Release();
+    return false;
+  }
+  device->Release();
+
+  live_ring_.clear();
+  stop_live_.store(false, std::memory_order_release);
+  live_thread_ = std::thread([this]() {
+    std::string err;
+    live_sink_.run_loop(&Engine::live_fill_thunk, this, stop_live_, err);
+    live_sink_.close();
+  });
   broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Live), std::memory_order_release);
   return true;
 }
 
 void Engine::disable_broadcast() {
   broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
+  stop_live_thread();
 }
 
 bool Engine::render_fill_thunk(void* user, float* dst, uint32_t frames) {
@@ -340,6 +418,14 @@ bool Engine::render_fill(float* dst, uint32_t frames) {
   master_meter_.accumulate(mon, frames, kEngineChannels);
   broadcast_meter_.accumulate(bc, frames, kEngineChannels);
   frames_rendered_.fetch_add(frames, std::memory_order_relaxed);
+
+  if (broadcast_state() == BroadcastState::Live) {
+    const auto written =
+      live_ring_.write(bc, static_cast<std::size_t>(frames) * kEngineChannels);
+    if (written < static_cast<std::size_t>(frames) * kEngineChannels) {
+      overruns_.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
 
   // Count underruns roughly: if any active capture ring was empty-ish — skipped for now.
 

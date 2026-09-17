@@ -19,7 +19,8 @@ Icon-first product shell: Sources → Mix → Outputs; engine vs broadcast state
 Scan/cache/load/editor/bypass/state + quarantine. **Next.**
 
 ## Phase 6 — Virtual output
-MixBridge Output endpoint; enables real On Air / Discord path. **Required for broadcast Live.**
+- **6.1** Live WASAPI render destination (user-selected endpoint / virtual cable) — **done**; enables real On Air.
+- **6.2** First-party MixBridge Output VAD — **blocked on WDK/signing**; scaffold in `native/driver/`.
 
 ## Phase 7 — Product UX
 Icon-first home screen, source picker, presets, first-run.

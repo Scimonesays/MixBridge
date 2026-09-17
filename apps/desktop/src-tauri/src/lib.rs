@@ -290,9 +290,9 @@ fn broadcast_disable(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn engine_list_capture(app: tauri::AppHandle) -> Result<Vec<DeviceDto>, String> {
+fn engine_list_render(app: tauri::AppHandle) -> Result<Vec<DeviceDto>, String> {
   ensure_engine_process(&app)?;
-  let lines = pipe_command_until_end("LIST_CAPTURE")?;
+  let lines = pipe_command_until_end("LIST_RENDER")?;
   let mut out = Vec::new();
   for line in lines {
     if !line.starts_with("DEVICE ") {
@@ -308,6 +308,17 @@ fn engine_list_capture(app: tauri::AppHandle) -> Result<Vec<DeviceDto>, String> 
     }
   }
   Ok(out)
+}
+
+#[tauri::command]
+fn engine_set_live_device(app: tauri::AppHandle, device_id: String) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("SET_LIVE_DEVICE {device_id}"))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
 }
 
 #[tauri::command]
@@ -477,8 +488,10 @@ pub fn run() {
       broadcast_enable,
       broadcast_disable,
       engine_list_capture,
+      engine_list_render,
       engine_list_processes,
       engine_list_sources,
+      engine_set_live_device,
       engine_add_physical,
       engine_add_process,
       engine_add_tone,

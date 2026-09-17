@@ -36,17 +36,18 @@ function Invoke-MbLines([string]$cmd) {
 `$w = New-Object System.IO.StreamWriter(`$n); `$w.AutoFlush = `$true
 `$null = `$r.ReadLine()
 `$w.WriteLine('$cmd')
-`$lines = New-Object System.Collections.Generic.List[string]
 while (`$true) {
   `$resp = `$r.ReadLine()
   if (-not `$resp) { break }
-  `$lines.Add(`$resp)
+  Write-Output `$resp
   if (`$resp -eq 'OK END' -or `$resp.StartsWith('ERR ')) { break }
 }
-`$lines -join "`n"
 `$n.Dispose()
 "@
-  return (powershell -NoProfile -Command $code)
+  $raw = powershell -NoProfile -Command $code
+  if ($null -eq $raw) { return @() }
+  if ($raw -is [System.Array]) { return @($raw | ForEach-Object { "$_".Trim() }) }
+  return @("$raw".Trim())
 }
 
 function Get-Field([string]$line, [string]$key) {
@@ -74,16 +75,45 @@ Check ($status -match "LIVE_DEST 0") "no fake live destination"
 $start = Invoke-Mb "START"
 Check ($start -match "OK STARTED") "engine start (monitor)"
 
-$live = Invoke-Mb "BROADCAST_ENABLE"
-Check ($live -match "no_live_destination") "Go Live blocked without live destination"
+$liveBlocked = Invoke-Mb "BROADCAST_ENABLE"
+Check ($liveBlocked -match "no_live_destination") "Go Live blocked without live destination"
 
 $status2 = Invoke-Mb "STATUS"
 Check ($status2 -match "STATE running") "engine still running in Standby"
 Check ($status2 -match "BROADCAST standby") "broadcast remains standby"
 
+$render = Invoke-MbLines "LIST_RENDER"
+Check (($render | Where-Object { $_ -match "DEVICE ID " }).Count -gt 0) "list render includes IDs"
+$renderId = $null
+$renderName = $null
+foreach ($line in $render) {
+  if ($line.StartsWith("DEVICE ID ") -and $line.Contains(" NAME ")) {
+    $rest = $line.Substring("DEVICE ID ".Length)
+    $idx = $rest.IndexOf(" NAME ")
+    if ($idx -gt 0) {
+      $renderId = $rest.Substring(0, $idx)
+      $renderName = $rest.Substring($idx + " NAME ".Length)
+      break
+    }
+  }
+}
+Check ($null -ne $renderId -and $renderId.Length -gt 0) "parsed render device id ($renderName)"
+$setLive = Invoke-Mb "SET_LIVE_DEVICE $renderId"
+Check ($setLive -match "OK LIVE_DEST") "set live destination ($setLive)"
+$goLive = Invoke-Mb "BROADCAST_ENABLE"
+Check ($goLive -match "OK LIVE") "Go Live with real destination ($goLive)"
+$statusLive = Invoke-Mb "STATUS"
+Check ($statusLive -match "BROADCAST live") "broadcast live while engine running"
+Check ($statusLive -match "STATE running") "engine still running On Air"
+$standby = Invoke-Mb "BROADCAST_DISABLE"
+Check ($standby -match "OK STANDBY") "return to Standby"
+$statusSb = Invoke-Mb "STATUS"
+Check ($statusSb -match "BROADCAST standby") "broadcast standby again"
+Check ($statusSb -match "STATE running") "monitor continues after Standby"
+
 $cap = Invoke-MbLines "LIST_CAPTURE"
-Check ($cap -match "DEVICE ID ") "list capture includes IDs"
-Check ($cap -match "NAME ") "list capture includes names"
+Check (($cap | Where-Object { $_ -match "DEVICE ID " }).Count -gt 0) "list capture includes IDs"
+Check (($cap | Where-Object { $_ -match "NAME " }).Count -gt 0) "list capture includes names"
 
 $idA = Get-Field (Invoke-Mb "ADD_TONE 440") "ID"
 $idB = Get-Field (Invoke-Mb "ADD_TONE 1000") "ID"
@@ -95,9 +125,10 @@ $rm = Invoke-Mb "REMOVE $idA"
 Check ($rm -match "OK REMOVED") "remove source A"
 
 $sources = Invoke-MbLines "LIST_SOURCES"
-Check ($sources -match "SOURCE ID $idB") "B remains"
-Check ($sources -notmatch "SOURCE ID $idA") "A gone"
-Check ($sources -match "MUTE 1") "B mute preserved"
+$srcText = ($sources -join "`n")
+Check ($srcText -match "SOURCE ID $idB") "B remains"
+Check ($srcText -notmatch "SOURCE ID $idA") "A gone"
+Check ($srcText -match "MUTE 1") "B mute preserved"
 
 # Physical default capture
 $phys = Invoke-Mb "ADD_PHYSICAL"
