@@ -1,39 +1,35 @@
 # MixBridge test plan & acceptance gates
 
-Status legend: PASS / FAIL / BLOCKED / NOT RUN
+Status legend: PASS / FAIL / BLOCKED / NOT RUN / PARTIAL
 
-## Automated (CI-capable)
+## Phase 3 realtime gates (current)
 
-| Test | Command | Status |
-|------|---------|--------|
-| DSP silence / tone / impulse | `scripts/run-audio-tests.ps1` (ctest) | NOT RUN until first green build |
-| IPC / config | TBD Phase 3+ | NOT RUN |
-| VST3 fixture | TBD Phase 5 | NOT RUN |
+See `artifacts/qa/latest/SUMMARY.md` for measured evidence.
 
-## Hardware / local acceptance gates
+| Gate | Status |
+|------|--------|
+| 3.1 Physical source | PASS |
+| 3.2 Monitor render | PASS |
+| 3.3 Process loopback in engine | PASS |
+| 3.4 Dual-source mix | PASS |
+| 3.5 Deterministic analysis | PASS |
+| 3.6 Gain | PASS |
+| 3.7 Mute | PASS |
+| 3.8 Meters | PASS |
+| 3.9 Device loss safety | PASS |
+| 3.10 30-min soak | PARTIAL (2-min PASS; 30-min running) |
+| 3.11 IPC | PASS |
+| 3.12 Tauri live meter | PARTIAL (compiles; UI sign-off pending) |
+
+## Product gates (overall)
 
 | Gate | Description | Status |
 |------|-------------|--------|
-| 1 Clean Build | Fresh checkout builds per `docs/SETUP.md` | PARTIAL — native probes build + DSP/ctest PASS (2026-09-17) |
-| 2 Clean Launch | App launches without hacks | NOT RUN (no UI yet) |
-| 3 Physical Audio | Capture/monitor/meter/mute/route | NOT RUN (probe capture only) |
-| 4 Application Capture | Deterministic test player capture | PARTIAL — process loopback probe PASS with `mb-tone-player` |
-| 5 VST3 | Fixture load/process/bypass/state | NOT RUN |
-| 6 Virtual Output | Endpoint + analysis | NOT RUN (WDK missing; fallback planned) |
-| 7 Real Performance | Guitar + FX + backing | NOT RUN |
-| 8 Stability | 30+ min soak | NOT RUN |
-| 9 UX | Fresh-user flow without docs | NOT RUN |
-| 10 Repository Quality | Docs current | PARTIAL — core docs present; expand as phases complete |
+| 1 Clean Build | Probes + engine build | PASS (native) |
+| 2 Clean Launch | App launches | PARTIAL (Tauri shell present) |
+| 3 Physical Audio | Product path | PARTIAL (engine harness) |
+| 4 Application Capture | Engine process loopback | PASS (harness) |
+| 5–9 | VST3 / virtual out / UX / soak product | NOT RUN |
+| 10 Repository Quality | Docs tracking reality | PASS for Phase 3 docs |
 
-**10/10 requires all ten PASS with evidence under `artifacts/qa/`.**
-
-## Evidence layout
-
-```text
-artifacts/qa/latest/
-  SUMMARY.md
-  environment.json
-  devices.json
-  test-results.json
-  ...
-```
+**10/10 product acceptance still requires all ten product gates.**

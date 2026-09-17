@@ -7,13 +7,13 @@ Detect/install toolchain; document setup. **In progress / largely done on primar
 Upstream clones, license firewall, architecture selection. **In progress.**
 
 ## Phase 2 — Audio probes
-Enumerate, capture, render, system loopback, process loopback, deterministic DSP tests. **In progress.**
+Enumerate, capture, render, system loopback, process loopback, deterministic DSP tests. **Done on this machine.**
 
 ## Phase 3 — Engine
-Realtime C++ engine process, mix graph, meters, x-runs, hotplug hooks. **Started** — mix graph + SPSC ring + offline render + unit test PASS. WASAPI device I/O next.
+Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, soak harness, Tauri shell scaffold. **Nearly complete — see QA gates 3.1–3.12.**
 
 ## Phase 4 — UI shell
-Tauri 2 minimal shell wired to controller IPC.
+Polish Tauri icon-first product UI on top of working IPC.
 
 ## Phase 5 — VST3
 Scan/cache/load/editor/bypass/state + quarantine.

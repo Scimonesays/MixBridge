@@ -1,38 +1,44 @@
 # MixBridge audio pipeline
 
-Canonical internal format:
+Date: 2026-09-17 (Phase 3 measured)
+
+## Canonical internal format
 
 | Property | Value |
 |----------|-------|
 | Rate | 48,000 Hz |
-| Format | IEEE float32 interleaved |
-| Buses | Monitor, Broadcast (extensible) |
-| Master | stereo |
+| Sample format | float32 interleaved |
+| Channels | stereo master (mono sources upmixed) |
+| Buses | Monitor (wired to WASAPI render), Broadcast (mixed + safety limiter; virtual out later) |
 
-## Source types (V1)
+## Realtime architecture (implemented)
 
-1. Physical capture endpoints (instrument / mic)
-2. System loopback (entire render device mix)
-3. Process loopback (process tree via Win10 20348+ APIs)
-4. Media file decode (later phase; not required for first probe)
-5. VST3 insert on a source chain
+```text
+Capture threads (WASAPI event-driven)
+  → SPSC float rings @ 48 kHz stereo
+Render thread (monitor WASAPI event callback)
+  → MixGraph::process (chunked, no heap)
+  → AtomicMeter snapshots
+  → WasapiRenderSink
+```
 
-## Realtime rules
+Device notifications (`IMMNotificationClient`) move the engine into `recovering` / `device_missing` instead of crashing.
 
-Audio callbacks must not:
+## Measured on this machine
 
-- allocate heap
-- touch filesystem/network/UI
-- take blocking locks
-- log with I/O
-- sleep
+| Item | Value |
+|------|-------|
+| Monitor device | RME Fireface UC Speakers |
+| Device mix rate observed | 44,100 Hz (AUTOCONVERT from engine 48 kHz) |
+| Shared buffer frames | 970 |
+| Estimated latency | ~22 ms (buffer_frames / device_rate) |
+| Dual-source harness | 440 Hz tone + process-loopback 1000 Hz → both detected in tap |
+| Physical capture | RME Analog 1+2 integrated without crash (AddRef race fixed) |
 
-Preallocate buffers. Prefer lock-free SPSC rings for UI↔engine sample transport. Control messages use a bounded non-blocking queue.
+## Conversion policy
 
-## Clocking
+When a device rejects float32/48k stereo, the engine falls back to the device mix format and converts to/from engine float stereo at the capture/render boundary (`AUTOCONVERTPCM` preferred when requesting engine format).
 
-Do not assume shared clocks across devices. Plan for adaptive resampling / drift correction on long sessions.
+## Realtime prohibitions (enforced by design)
 
-## Protection
-
-Transparent safety limiter on the broadcast bus before virtual output.
+No heap / filesystem / network / UI / blocking control mutex / disk logging on the render callback path. Tap uses a lock-free SPSC ring.

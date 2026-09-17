@@ -1,13 +1,16 @@
 # Performance notes
 
-Targets (optimize after correctness):
+Measured on Windows 11 + RME Fireface UC (2026-09-17):
 
-- Near-zero UI impact on audio
-- No accumulating memory growth
-- No periodic audio stalls
-- Modest UI footprint (Tauri preferred over Electron)
-- Measure real latency; never guess
+| Metric | Value |
+|--------|-------|
+| Engine format | 48 kHz float32 stereo |
+| Device rate (monitor) | 44.1 kHz shared |
+| Buffer frames | 970 |
+| Estimated latency | ~22 ms |
+| Harness xruns (2.5 s) | 0 |
+| Soak 2 min xruns | 0 |
+| Soak 2 min WS | ~12.4 MB stable (+0.22 MB) |
+| IPC meter poll | non-realtime; does not join audio callback |
 
-Buffer size options: 64 / 128 / 256 / 512 (device-capable only).
-
-X-run counters must be exposed in diagnostics.
+Targets unchanged: near-zero UI impact on audio; no unbounded memory growth; measure latency — never guess.

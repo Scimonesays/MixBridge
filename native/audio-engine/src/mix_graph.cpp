@@ -5,86 +5,108 @@
 #include <numbers>
 
 namespace mixbridge {
+namespace {
 
-uint32_t MixGraph::add_source(SourceNode node) {
-  node.id = next_id_++;
-  sources_.push_back(std::move(node));
-  return sources_.back().id;
-}
-
-bool MixGraph::remove_source(uint32_t id) {
-  const auto it = std::remove_if(sources_.begin(), sources_.end(),
-                                 [&](const SourceNode& s) { return s.id == id; });
-  if (it == sources_.end()) return false;
-  sources_.erase(it, sources_.end());
-  return true;
-}
-
-SourceNode* MixGraph::find(uint32_t id) {
-  for (auto& s : sources_) {
-    if (s.id == id) return &s;
-  }
-  return nullptr;
-}
-
-void MixGraph::apply_safety_limiter(float* interleaved, std::size_t samples) {
-  // Simple tanh soft clip — protects against catastrophic peaks without a hard squash.
-  for (std::size_t i = 0; i < samples; ++i) {
-    interleaved[i] = std::tanh(interleaved[i] * 1.2f) / std::tanh(1.2f);
-  }
-}
-
-void MixGraph::process(uint32_t frames, MixBuses& out) {
-  const std::size_t samples = static_cast<std::size_t>(frames) * kChannels;
-  out.monitor.assign(samples, 0.0f);
-  out.broadcast.assign(samples, 0.0f);
-
+void process_chunk(
+  SourceSlot* slots,
+  uint32_t frames,
+  float* monitor_out,
+  float* broadcast_out,
+  float master_gain) {
   bool any_solo = false;
-  for (const auto& s : sources_) {
-    if (s.solo && !s.mute) any_solo = true;
+  for (uint32_t s = 0; s < kMaxSources; ++s) {
+    if (!slots[s].active.load(std::memory_order_relaxed)) continue;
+    if (slots[s].solo.load(std::memory_order_relaxed) &&
+        !slots[s].mute.load(std::memory_order_relaxed)) {
+      any_solo = true;
+      break;
+    }
   }
 
-  std::size_t idx = 0;
-  for (auto& s : sources_) {
-    if (s.mute) {
-      ++idx;
-      continue;
-    }
-    if (any_solo && !s.solo) {
-      ++idx;
-      continue;
+  alignas(64) float src_buf[512 * 2];
+
+  for (uint32_t s = 0; s < kMaxSources; ++s) {
+    auto& slot = slots[s];
+    if (!slot.active.load(std::memory_order_relaxed)) continue;
+    if (slot.mute.load(std::memory_order_relaxed)) continue;
+    if (any_solo && !slot.solo.load(std::memory_order_relaxed)) continue;
+
+    const auto kind = static_cast<SourceKind>(slot.kind.load(std::memory_order_relaxed));
+    const float gain = slot.gain.load(std::memory_order_relaxed) * master_gain;
+    const float pan = std::clamp(slot.pan.load(std::memory_order_relaxed), -1.0f, 1.0f);
+    const float gL = gain * (0.5f * (1.0f - pan));
+    const float gR = gain * (0.5f * (1.0f + pan));
+    const bool to_mon = slot.monitor.load(std::memory_order_relaxed);
+    const bool to_bc = slot.broadcast.load(std::memory_order_relaxed);
+
+    const uint32_t need = frames * kEngineChannels;
+    if (kind == SourceKind::ToneFixture) {
+      const float hz = slot.tone_hz.load(std::memory_order_relaxed);
+      const double inc = (hz > 0.0f) ? (2.0 * std::numbers::pi * static_cast<double>(hz) /
+                                        static_cast<double>(kEngineRate))
+                                     : 0.0;
+      for (uint32_t i = 0; i < frames; ++i) {
+        const float sample = static_cast<float>(std::sin(slot.tone_phase) * 0.2);
+        slot.tone_phase += inc;
+        src_buf[i * 2] = sample;
+        src_buf[i * 2 + 1] = sample;
+      }
+    } else {
+      const auto got = static_cast<uint32_t>(slot.ring.read(src_buf, need));
+      for (uint32_t i = got; i < need; ++i) src_buf[i] = 0.0f;
     }
 
-    double& phase = tone_phase_[idx % 64];
-    const double inc = (s.kind == SourceKind::ToneFixture && s.tone_hz > 0.0)
-                         ? (2.0 * std::numbers::pi * s.tone_hz / static_cast<double>(kRate))
-                         : 0.0;
-
-    const float pan = std::clamp(s.pan, -1.0f, 1.0f);
-    const float gL = s.gain * (0.5f * (1.0f - pan));
-    const float gR = s.gain * (0.5f * (1.0f + pan));
+    slot.meter.accumulate(src_buf, frames, kEngineChannels);
 
     for (uint32_t i = 0; i < frames; ++i) {
-      float sample = 0.0f;
-      if (inc > 0.0) {
-        sample = static_cast<float>(std::sin(phase) * 0.2);
-        phase += inc;
+      const float l = src_buf[i * 2] * gL;
+      const float r = src_buf[i * 2 + 1] * gR;
+      if (to_mon) {
+        monitor_out[i * 2] += l;
+        monitor_out[i * 2 + 1] += r;
       }
-      const float l = sample * gL * master_gain_;
-      const float r = sample * gR * master_gain_;
-      if (s.monitor) {
-        out.monitor[i * 2] += l;
-        out.monitor[i * 2 + 1] += r;
-      }
-      if (s.broadcast) {
-        out.broadcast[i * 2] += l;
-        out.broadcast[i * 2 + 1] += r;
+      if (to_bc) {
+        broadcast_out[i * 2] += l;
+        broadcast_out[i * 2 + 1] += r;
       }
     }
-    ++idx;
+  }
+}
+
+}  // namespace
+
+void MixGraph::apply_safety_limiter(float* interleaved, std::size_t samples) {
+  // Soft clip that asymptotes at ±1.0 (transparent at modest levels).
+  for (std::size_t i = 0; i < samples; ++i) {
+    interleaved[i] = std::tanh(interleaved[i]);
+  }
+}
+
+void MixGraph::process(
+  SourceSlot* slots,
+  uint32_t frames,
+  float* monitor_out,
+  float* broadcast_out,
+  float master_gain,
+  bool apply_broadcast_limiter) {
+  const uint32_t samples = frames * kEngineChannels;
+  for (uint32_t i = 0; i < samples; ++i) {
+    monitor_out[i] = 0.0f;
+    broadcast_out[i] = 0.0f;
   }
 
-  apply_safety_limiter(out.broadcast.data(), out.broadcast.size());
+  constexpr uint32_t kChunk = 512;
+  uint32_t offset = 0;
+  while (offset < frames) {
+    const uint32_t n = std::min(kChunk, frames - offset);
+    process_chunk(slots, n, monitor_out + offset * kEngineChannels,
+                  broadcast_out + offset * kEngineChannels, master_gain);
+    offset += n;
+  }
+
+  if (apply_broadcast_limiter) {
+    apply_safety_limiter(broadcast_out, samples);
+  }
 }
 
 }  // namespace mixbridge

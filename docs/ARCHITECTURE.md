@@ -121,10 +121,20 @@ Use Windows 10 build 20348+ application loopback (`ActivateAudioInterfaceAsync` 
 
 Human-readable versioned config with migration + backup before migrate (`crates/mixbridge-config`).
 
-## Privacy
+## IPC decision (Phase 3K)
 
-No telemetry/accounts/cloud by default. Diagnostics are local export only.
+Transport: **Windows named pipe** `\\.\pipe\mixbridge-engine`
 
-## Major structure deviations
+Why:
+- Simple to debug (line-oriented text protocol)
+- Natural process isolation (UI/controller ≠ realtime)
+- Adequate latency for control/metering (not sample transport)
+- Sample audio stays inside the native engine process via WASAPI + SPSC rings
 
-None yet. Repository follows the documented MixBridge tree in the master directive.
+Binary: `mb-engine-ipc.exe`  
+Protocol version header: `OK HELLO mixbridge-ipc/1`
+
+Commands include `PING`, `STATUS`, `START`, `STOP`, `ADD_TONE`, `SET_GAIN`, `SET_MUTE`, `METER_MASTER`, `LIST_CAPTURE`, `LIST_RENDER`, `SHUTDOWN`.
+
+Tauri shell talks to this pipe via Rust commands; it does not link the C++ engine in-process.
+

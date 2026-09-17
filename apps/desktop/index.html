@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MixBridge</title>
+    <link rel="icon" type="image/png" href="/src/assets/branding/mixbridge-logo.png" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="top">
+        <img class="logo" src="/src/assets/branding/mixbridge-logo.png" alt="MixBridge" width="36" height="36" />
+        <span id="state" class="state" title="Engine state">—</span>
+      </header>
+
+      <section class="meter-wrap" aria-label="Master meter">
+        <div id="meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </section>
+
+      <section class="sources" aria-label="Sources">
+        <button id="btn-add-tone" class="icon-btn" title="Add tone source" aria-label="Add tone source">＋</button>
+        <button id="btn-mute" class="icon-btn" title="Mute" aria-label="Mute">🔇</button>
+        <input id="gain" type="range" min="0" max="200" value="100" title="Gain" aria-label="Gain" />
+      </section>
+
+      <section class="transport">
+        <button id="btn-start" class="icon-btn primary" title="Start" aria-label="Start">▶</button>
+        <button id="btn-stop" class="icon-btn" title="Stop" aria-label="Stop">■</button>
+      </section>
+
+      <p id="status" class="status" hidden></p>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+# Generated / local
+/target/
+/gen/
+/WixTools/
+*.log
