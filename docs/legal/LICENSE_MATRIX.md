@@ -29,6 +29,7 @@ Forbidden as source imports into MIT application/engine code without a separate 
 | MicDeck / Virtual-Soundboard | MIT | `4ec7e53` | Patterns only; no wholesale import | engine design notes | attribute if code adapted |
 | wasamix | MIT OR Apache-2.0 | `80b4b828` | Yes if adapted | native/probes, engine ideas | yes |
 | Virtual-Audio-Driver | MIT | `bb34fba` | Yes if adapted | `native/driver/` | yes |
+| Steinberg VST3 SDK | MIT | `v3.7.12_build_20` | Yes | `third_party/vst3sdk/` (fetched, not committed) | verify on upgrade |
 | Windows-classic-samples | MIT | `434f600` | Yes | probes / engine loopback | Microsoft MIT notice |
 | Windows-driver-samples (SysVAD) | MS-PL | `97429c5` | Isolated only | `native/driver/` | MS-PL NOTICE |
 | cpal | Apache-2.0 | `c811531` | Yes as crate dep if chosen | tools/crates | Apache NOTICE |

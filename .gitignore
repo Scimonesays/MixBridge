@@ -62,6 +62,9 @@ artifacts/qa/**/*.log
 **/plugin-cache/
 **/quarantine/
 
+# Large third-party SDKs (use scripts/fetch-*.ps1)
+third_party/vst3sdk/
+
 # Test temp
 **/tmp/
 **/temp/
