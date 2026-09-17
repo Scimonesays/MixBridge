@@ -10,26 +10,52 @@
   <body>
     <div id="app">
       <header class="top">
-        <img class="logo" src="/src/assets/branding/mixbridge-logo.png" alt="MixBridge" width="36" height="36" />
-        <span id="state" class="state" title="Engine state">—</span>
+        <img class="logo" src="/src/assets/branding/mixbridge-logo.png" alt="MixBridge" width="40" height="40" />
+        <span id="air-badge" class="badge" title="Broadcast state" aria-live="polite">Standby</span>
       </header>
 
-      <section class="meter-wrap" aria-label="Master meter">
-        <div id="meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
-      </section>
+      <main class="flow" aria-label="Sources mix outputs">
+        <section class="col" aria-label="Sources">
+          <h2 class="col-title">Sources</h2>
+          <div id="source-card" class="source-card" hidden>
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12z"/>
+            </svg>
+            <div class="meter-wrap" aria-hidden="true"><div id="source-meter" class="meter"></div></div>
+            <div class="source-actions">
+              <button id="btn-mute" class="icon-btn" title="Mute" aria-label="Mute" aria-pressed="false">
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 9v6h4l5 5V4L9 9H5zm12.5 3a4.5 4.5 0 0 0-2.5-4.03v8.06A4.5 4.5 0 0 0 17.5 12z"/></svg>
+              </button>
+              <input id="gain" type="range" min="0" max="200" value="100" title="Level" aria-label="Level" />
+            </div>
+          </div>
+          <div class="row-actions">
+            <button id="btn-add-tone" class="icon-btn" title="Add tone source" aria-label="Add tone source">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+            </button>
+          </div>
+        </section>
 
-      <section class="sources" aria-label="Sources">
-        <button id="btn-add-tone" class="icon-btn" title="Add tone source" aria-label="Add tone source">＋</button>
-        <button id="btn-mute" class="icon-btn" title="Mute" aria-label="Mute">🔇</button>
-        <input id="gain" type="range" min="0" max="200" value="100" title="Gain" aria-label="Gain" />
-      </section>
+        <section class="mix-core" aria-label="Mix">
+          <h2 class="col-title">Mix</h2>
+          <div class="meter-wrap" style="width:140px" aria-label="Master meter">
+            <div id="meter" class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+          </div>
+          <button id="btn-live" class="icon-btn live standby" title="Go Live" aria-label="Go Live" aria-pressed="false">GO LIVE</button>
+        </section>
 
-      <section class="transport">
-        <button id="btn-start" class="icon-btn primary" title="Start" aria-label="Start">▶</button>
-        <button id="btn-stop" class="icon-btn" title="Stop" aria-label="Stop">■</button>
-      </section>
+        <section class="col" aria-label="Outputs">
+          <h2 class="col-title">Outputs</h2>
+          <div class="dest-card">
+            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h2v-8H5a7 7 0 0 1 14 0h-2v8h2a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z"/>
+            </svg>
+            <span class="col-title" style="margin:0">Monitor</span>
+          </div>
+        </section>
+      </main>
 
-      <p id="status" class="status" hidden></p>
+      <p id="status" class="status" role="status"></p>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

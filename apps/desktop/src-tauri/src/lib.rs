@@ -1,5 +1,3 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::io::{BufRead, BufReader, Write};
@@ -37,18 +35,29 @@ fn pipe_command(cmd: &str) -> Result<String, String> {
   #[cfg(windows)]
   {
     use std::fs::OpenOptions;
-    let mut pipe = OpenOptions::new()
-      .read(true)
-      .write(true)
-      .open(r"\\.\pipe\mixbridge-engine")
-      .map_err(|e| format!("engine offline ({e})"))?;
-    let mut reader = BufReader::new(pipe.try_clone().map_err(|e| e.to_string())?);
-    let mut hello = String::new();
-    reader.read_line(&mut hello).map_err(|e| e.to_string())?;
-    writeln!(pipe, "{cmd}").map_err(|e| e.to_string())?;
-    let mut resp = String::new();
-    reader.read_line(&mut resp).map_err(|e| e.to_string())?;
-    Ok(resp.trim().to_string())
+    let mut last_err = String::new();
+    for _ in 0..8 {
+      match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(r"\\.\pipe\mixbridge-engine")
+      {
+        Ok(mut pipe) => {
+          let mut reader = BufReader::new(pipe.try_clone().map_err(|e| e.to_string())?);
+          let mut hello = String::new();
+          reader.read_line(&mut hello).map_err(|e| e.to_string())?;
+          writeln!(pipe, "{cmd}").map_err(|e| e.to_string())?;
+          let mut resp = String::new();
+          reader.read_line(&mut resp).map_err(|e| e.to_string())?;
+          return Ok(resp.trim().to_string());
+        }
+        Err(e) => {
+          last_err = e.to_string();
+          std::thread::sleep(Duration::from_millis(80));
+        }
+      }
+    }
+    Err(format!("engine offline ({last_err})"))
   }
   #[cfg(not(windows))]
   {
@@ -90,14 +99,31 @@ fn ensure_engine_process(app: &tauri::AppHandle) -> Result<(), String> {
     return Err("mb-engine-ipc.exe not found".into());
   };
   eng.child = Some(child);
-  std::thread::sleep(Duration::from_millis(400));
+  std::thread::sleep(Duration::from_millis(500));
   Ok(())
+}
+
+fn force_respawn(app: &tauri::AppHandle) -> Result<(), String> {
+  {
+    let mut eng = ENGINE.lock().map_err(|e| e.to_string())?;
+    if let Some(mut child) = eng.child.take() {
+      let _ = child.kill();
+      let _ = child.wait();
+    }
+  }
+  ensure_engine_process(app)
 }
 
 #[tauri::command]
 fn engine_status(app: tauri::AppHandle) -> Result<StatusDto, String> {
   ensure_engine_process(&app)?;
-  let raw = pipe_command("STATUS")?;
+  let raw = match pipe_command("STATUS") {
+    Ok(v) => v,
+    Err(_) => {
+      force_respawn(&app)?;
+      pipe_command("STATUS")?
+    }
+  };
   let state = raw
     .split_whitespace()
     .skip_while(|t| *t != "STATE")
@@ -152,6 +178,17 @@ fn engine_stop(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn engine_restart(app: tauri::AppHandle) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command("RESTART")?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
 fn engine_add_tone(app: tauri::AppHandle, hz: f32) -> Result<IdDto, String> {
   ensure_engine_process(&app)?;
   let raw = pipe_command(&format!("ADD_TONE {hz}"))?;
@@ -193,6 +230,7 @@ pub fn run() {
       engine_meter,
       engine_start,
       engine_stop,
+      engine_restart,
       engine_add_tone,
       engine_set_gain,
       engine_set_mute

@@ -17,17 +17,17 @@ See `artifacts/qa/latest/SUMMARY.md` for measured evidence.
 | 3.7 Mute | PASS |
 | 3.8 Meters | PASS |
 | 3.9 Device loss safety | PASS |
-| 3.10 30-min soak | PARTIAL (2-min PASS; 30-min running) |
+| 3.10 30-min soak | PASS (maintainer accept; xruns=0, WS stable) |
 | 3.11 IPC | PASS |
-| 3.12 Tauri live meter | PARTIAL (compiles; UI sign-off pending) |
+| 3.12 Tauri live meter | PASS (IPC live-control proof + Tauri `dev` run) |
 
 ## Product gates (overall)
 
 | Gate | Description | Status |
 |------|-------------|--------|
 | 1 Clean Build | Probes + engine build | PASS (native) |
-| 2 Clean Launch | App launches | PARTIAL (Tauri shell present) |
-| 3 Physical Audio | Product path | PARTIAL (engine harness) |
+| 2 Clean Launch | App launches | PASS (Tauri `mixbridge-desktop` `dev`) |
+| 3 Physical Audio | Product path | PARTIAL (engine harness; Phase 4 product shell next) |
 | 4 Application Capture | Engine process loopback | PASS (harness) |
 | 5–9 | VST3 / virtual out / UX / soak product | NOT RUN |
 | 10 Repository Quality | Docs tracking reality | PASS for Phase 3 docs |

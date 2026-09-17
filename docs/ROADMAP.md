@@ -10,10 +10,10 @@ Upstream clones, license firewall, architecture selection. **In progress.**
 Enumerate, capture, render, system loopback, process loopback, deterministic DSP tests. **Done on this machine.**
 
 ## Phase 3 — Engine
-Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, soak harness, Tauri shell scaffold. **Nearly complete — see QA gates 3.1–3.12.**
+Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, soak harness, Tauri shell. **Complete — gates 3.1–3.12 PASS** (`artifacts/qa/latest/SUMMARY.md`).
 
 ## Phase 4 — UI shell
-Polish Tauri icon-first product UI on top of working IPC.
+Icon-first product shell: Sources → Mix → Outputs, Go Live / On Air, no helper prose. **In progress.**
 
 ## Phase 5 — VST3
 Scan/cache/load/editor/bypass/state + quarantine.

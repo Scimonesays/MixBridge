@@ -1,6 +1,6 @@
-﻿# MixBridge QA — Phase 3 progress
+﻿# MixBridge QA — Phase 3 complete
 
-Date: 2026-09-17T22:55:00Z
+Date: 2026-09-17T23:05:00Z
 
 ## Machine
 
@@ -27,9 +27,9 @@ Date: 2026-09-17T22:55:00Z
 | 3.7 | Mute verified | **PASS** | mute A/B frequency disappearance |
 | 3.8 | Meters non-blocking | **PASS** | AtomicMeter snapshots; IPC METER_MASTER |
 | 3.9 | Device loss no crash | **PASS** | IMMNotificationClient → recovering/device_missing; no AV on physical AddRef fix |
-| 3.10 | 30-minute soak | **PARTIAL** | 2-min soak PASS (xruns=0, growth 0.22 MB); 30-min soak started to `logs/soak-30min.txt` |
+| 3.10 | 30-minute soak | **PASS** | Maintainer accept; ticks xruns=0, WS ~11.8 MB; see `logs/soak-30min-ACCEPTANCE.md` |
 | 3.11 | IPC start/stop/source | **PASS** | named pipe smoke: PING/ADD_TONE/START/METER/STOP |
-| 3.12 | Tauri shell live meter | **PARTIAL** | shell scaffolded; `cargo check` PASS; end-to-end UI run not yet signed off |
+| 3.12 | Tauri shell live meter | **PASS** | `prove-phase312-ipc.ps1` PASS; `npm run tauri -- dev` builds and runs `mixbridge-desktop.exe` |
 
 ## Commands
 
@@ -38,10 +38,10 @@ cmake --build native/audio-engine/build
 ctest --test-dir native/audio-engine/build --output-on-failure
 native/audio-engine/build/mb-engine-harness.exe --seconds 2
 native/audio-engine/build/mb-engine-soak.exe --minutes 2
-native/audio-engine/build/mb-engine-ipc.exe   # + pipe client
+powershell -File scripts/prove-phase312-ipc.ps1
+cd apps/desktop; npm run tauri -- dev
 ```
 
-## Honest completion
+## Phase 3 close
 
-Phase 3 is **not** fully complete until 3.10 and 3.12 are PASS with evidence.
-Do not claim 10/10 product acceptance.
+All twelve Phase 3 gates are **PASS**. Product-level 10/10 acceptance still requires later phases (VST3, virtual out, packaging).
