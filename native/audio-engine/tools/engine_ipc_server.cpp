@@ -268,6 +268,16 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       iss >> id >> enabled;
       if (engine.set_source_effect_bypass(id, enabled != 0, err)) write_line(pipe, "OK FX_BYPASS");
       else write_line(pipe, "ERR " + err);
+    } else if (cmd == "OPEN_FX_EDITOR") {
+      uint32_t id = 0;
+      iss >> id;
+      if (engine.open_source_effect_editor(id, err)) write_line(pipe, "OK FX_EDITOR");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "CLOSE_FX_EDITOR") {
+      uint32_t id = 0;
+      iss >> id;
+      if (engine.close_source_effect_editor(id, err)) write_line(pipe, "OK FX_EDITOR_CLOSED");
+      else write_line(pipe, "ERR " + err);
     } else if (cmd == "SAVE_FX_STATE") {
       uint32_t id = 0;
       iss >> id;

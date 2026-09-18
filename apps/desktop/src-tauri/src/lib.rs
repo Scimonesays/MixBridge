@@ -634,6 +634,20 @@ fn engine_set_vst3_bypass(app: tauri::AppHandle, id: u32, bypass: bool) -> Resul
 }
 
 #[tauri::command]
+fn engine_open_vst3_editor(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("OPEN_FX_EDITOR {id}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
+fn engine_close_vst3_editor(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("CLOSE_FX_EDITOR {id}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
 fn engine_save_vst3_state(
   app: tauri::AppHandle,
   id: u32,
@@ -768,6 +782,8 @@ pub fn run() {
       engine_set_vst3,
       engine_clear_vst3,
       engine_set_vst3_bypass,
+      engine_open_vst3_editor,
+      engine_close_vst3_editor,
       engine_save_vst3_state,
       engine_load_vst3_state,
       engine_set_gain,

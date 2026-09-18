@@ -38,6 +38,7 @@ const ICON = {
   trash: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v10h-2V9zm4 0h2v10h-2V9zM7 9h2v10H7V9z"/></svg>`,
   fx: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 2h2v5h4V2h2v5h2v5a6 6 0 0 1-5 5.92V22h-2v-4.08A6 6 0 0 1 6 12V7h2V2zm0 7v3a4 4 0 0 0 8 0V9H8z"/></svg>`,
   power: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 2h2v10h-2V2zm-4.95 3.64 1.41 1.42A7 7 0 1 0 16.54 7l1.41-1.42A9 9 0 1 1 6.05 5.64z"/></svg>`,
+  window: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v14H4V5zm2 3v9h12V8H6zm1-2h2v1H7V6zm3 0h2v1h-2V6z"/></svg>`,
   back: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14.7 5.3 8 12l6.7 6.7 1.4-1.4L10.8 12l5.3-5.3-1.4-1.4z"/></svg>`,
 };
 
@@ -542,9 +543,19 @@ async function showEffectList(src) {
     current.innerHTML = `
       <div class="fx-current-name">${ICON.fx}<span>${src.effectName || pluginNameFromPath(src.effectPath)}</span></div>
       <div class="fx-current-actions">
+        <button type="button" class="icon-btn tiny fx-open active" title="Open effect" aria-label="Open effect editor">${ICON.window}</button>
         <button type="button" class="icon-btn tiny fx-bypass ${src.effectBypass ? "" : "active"}" title="Bypass" aria-label="Bypass effect" aria-pressed="${!!src.effectBypass}">${ICON.power}</button>
         <button type="button" class="icon-btn tiny ghost fx-clear" title="Remove effect" aria-label="Remove effect">${ICON.trash}</button>
       </div>`;
+    current.querySelector(".fx-open").addEventListener("click", async () => {
+      try {
+        await invoke("engine_open_vst3_editor", { id: src.id });
+        closePicker();
+        showError("");
+      } catch (e) {
+        showError(String(e));
+      }
+    });
     current.querySelector(".fx-bypass").addEventListener("click", async () => {
       const next = !src.effectBypass;
       try {

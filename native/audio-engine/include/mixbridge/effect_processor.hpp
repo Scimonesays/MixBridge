@@ -17,6 +17,12 @@ public:
   virtual bool bypass() const noexcept { return false; }
   virtual bool faulted() const noexcept { return false; }
   virtual std::string_view name() const noexcept { return {}; }
+  virtual bool open_editor(std::string& error) {
+    error = "effect_editor_unsupported";
+    return false;
+  }
+  virtual void close_editor() noexcept {}
+  virtual bool editor_open() const noexcept { return false; }
   virtual bool save_state_file(const std::string&, std::string& error) {
     error = "effect_state_unsupported";
     return false;

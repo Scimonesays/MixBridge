@@ -79,6 +79,8 @@ public:
   bool set_source_effect_bypass(uint32_t id, bool bypass, std::string& error);
   bool save_source_effect_state(uint32_t id, const std::string& path, std::string& error);
   bool load_source_effect_state(uint32_t id, const std::string& path, std::string& error);
+  bool open_source_effect_editor(uint32_t id, std::string& error);
+  bool close_source_effect_editor(uint32_t id, std::string& error);
 
   MeterSnapshot source_meter(uint32_t id);
   MeterSnapshot master_meter();

@@ -28,6 +28,9 @@ public:
   bool bypass() const noexcept override { return processor_.bypass(); }
   bool faulted() const noexcept override { return processor_.faulted(); }
   std::string_view name() const noexcept override { return processor_.name(); }
+  bool open_editor(std::string& error) override { return processor_.open_editor(error); }
+  void close_editor() noexcept override { processor_.close_editor(); }
+  bool editor_open() const noexcept override { return processor_.editor_open(); }
 
   bool save_state_file(const std::string& path, std::string& error) override {
     std::vector<uint8_t> component;

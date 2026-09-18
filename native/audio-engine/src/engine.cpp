@@ -563,6 +563,31 @@ bool Engine::load_source_effect_state(
   return ok_state;
 }
 
+bool Engine::open_source_effect_editor(uint32_t id, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+    if (slots_[i].active.load() && slots_[i].id.load() == id) {
+      if (!effects_[i]) { error = "source has no effect"; return false; }
+      return effects_[i]->open_editor(error);
+    }
+  }
+  error = "source not found";
+  return false;
+}
+
+bool Engine::close_source_effect_editor(uint32_t id, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+    if (slots_[i].active.load() && slots_[i].id.load() == id) {
+      if (!effects_[i]) { error = "source has no effect"; return false; }
+      effects_[i]->close_editor();
+      return true;
+    }
+  }
+  error = "source not found";
+  return false;
+}
+
 MeterSnapshot Engine::source_meter(uint32_t id) {
   if (auto* s = slot_by_id(id)) return s->meter.snapshot_and_reset();
   return {};
