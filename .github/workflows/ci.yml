@@ -31,10 +31,13 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir native/audio-engine/build -C Release --output-on-failure
-      - name: Configure VST3 scanner
+      - name: Fetch pinned VST3 SDK
+        shell: pwsh
+        run: powershell -File scripts/fetch-vst3sdk.ps1
+      - name: Configure VST3 host
         shell: pwsh
         run: cmake -S native/vst3-host -B native/vst3-host/build
-      - name: Build VST3 scanner
+      - name: Build VST3 host + scanner
         shell: pwsh
         run: cmake --build native/vst3-host/build --config Release
       - name: Desktop frontend build
