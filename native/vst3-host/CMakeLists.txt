@@ -53,14 +53,21 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
 
   option(MIXBRIDGE_BUILD_VST3_FIXTURE "Build Steinberg AGain fixture for host verification" OFF)
   if(MIXBRIDGE_BUILD_VST3_FIXTURE)
-    if(NOT DEFINED vstsdk_VERSION)
-      set(vstsdk_VERSION "3.7.12")
-    endif()
-    add_subdirectory(
-      "${MIXBRIDGE_VST3_SDK}/public.sdk/samples/vst/again_sampleaccurate"
-      "${CMAKE_BINARY_DIR}/mixbridge-vst3-fixture"
-      EXCLUDE_FROM_ALL
+    set(MIXBRIDGE_AGAIN_DIR
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/samples/vst/again_sampleaccurate")
+    smtg_add_vst3plugin(mixbridge-vst3-fixture
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa_controller.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa_factory.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa_processor.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa.h"
+      "${MIXBRIDGE_AGAIN_DIR}/source/tutorial.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/tutorial.h"
+      "${MIXBRIDGE_AGAIN_DIR}/source/version.h"
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/utility/test/sampleaccuratetest.cpp"
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/utility/test/rttransfertest.cpp"
     )
+    target_link_libraries(mixbridge-vst3-fixture PRIVATE sdk_hosting)
+    target_compile_features(mixbridge-vst3-fixture PUBLIC cxx_std_17)
   endif()
 else()
   message(STATUS "MixBridge VST3 SDK not present; scanner-only build. Run scripts/fetch-vst3sdk.ps1.")
