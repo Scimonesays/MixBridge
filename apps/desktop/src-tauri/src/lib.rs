@@ -87,6 +87,8 @@ struct SessionSourceDto {
   broadcast: bool,
   #[serde(default)]
   fx: Vec<String>,
+  #[serde(default)]
+  fx_bypass: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

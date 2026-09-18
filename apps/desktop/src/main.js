@@ -117,6 +117,7 @@ function sourceToSession(src) {
     monitor: src.monitor,
     broadcast: src.broadcast,
     fx: src.effectPath ? [src.effectPath] : [],
+    fx_bypass: !!src.effectBypass,
   };
 }
 
@@ -159,6 +160,9 @@ async function applySourceSettings(id, cfg) {
   await invoke("engine_set_broadcast", { id, enabled: cfg.broadcast !== false });
   if (Array.isArray(cfg.fx) && cfg.fx[0]) {
     await invoke("engine_set_vst3", { id, modulePath: cfg.fx[0] });
+    if (cfg.fx_bypass) {
+      await invoke("engine_set_vst3_bypass", { id, bypass: true });
+    }
   }
 }
 
@@ -193,6 +197,7 @@ async function tryRestorePendingSources() {
             deviceId: device.id,
             effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
             effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
+            effectBypass: !!cfg.fx_bypass,
           });
           continue;
         }
@@ -218,6 +223,7 @@ async function tryRestorePendingSources() {
             processName: label,
             effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
             effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
+            effectBypass: !!cfg.fx_bypass,
           });
           continue;
         }

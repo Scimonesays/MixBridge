@@ -20,7 +20,8 @@ The product default is a quiet auto-save/auto-restore flow: source/device choice
       "mute": false,
       "monitor": true,
       "broadcast": true,
-      "fx": []
+      "fx": [],
+      "fx_bypass": false
     },
     {
       "kind": "process",
@@ -42,4 +43,5 @@ Current behavior:
 - physical sources restore by endpoint ID, with friendly-name fallback;
 - application sources restore by process name and retry when the app starts later;
 - gain, mute, monitor route, and broadcast route persist;
-- `fx` is reserved for Phase 5 plugin-chain persistence.
+- the current VST3 insert path and bypass state persist;
+- `fx` remains an array so later plugin-chain expansion does not require replacing the session shape.
