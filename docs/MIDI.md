@@ -10,7 +10,13 @@ Basic MIDI for starter instruments and VST3 instruments:
 
 ## Status
 
-Not implemented yet. Engine currently hosts audio FX; MIDI event injection into VST3 `IEventList` is the next hosting step after virtual output unblocks.
+**Not implemented.** Tone / built-in instrument sources exist via `ADD_TONE` / `engine_add_tone`, but there is no winmm (or other) MIDI input path and no note→frequency / note→VST3 `IEventList` injection yet.
+
+Next steps when scheduled:
+
+1. Enumerate MIDI-in devices + hotplug.
+2. Map note-on/off to the active built-in tone/instrument source (minimal product win).
+3. Forward events into hosted VST3 instruments via `IEventList`.
 
 ## Non-goals
 

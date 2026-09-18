@@ -43,7 +43,8 @@
     "O_presets": "Discord Jam save/load wired; timing via console preset_restore_ms",
     "B_install": "Release exe built; NSIS bundle enabling in progress",
     "L_discord": "No VB-CABLE/MixBridge Output on machine yet; Live render endpoints are RME + NVIDIA only",
-    "J_midi": "Spec + host hooks planned; MIDI event injection not product-complete"
+    "J_midi": "Spec only; no winmm MIDI input yet (tone path exists without note injection)",
+    "Y_screenshots": "Checklist ready at artifacts/qa/final/screenshots/README.md; capture via scripts/capture-screenshots.ps1 — PNGs NOT_RUN"
   },
   "external_blockers": [
     "WindowsKernelModeDriver10.0 platform toolset (installing VS WDK component)",

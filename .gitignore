@@ -46,7 +46,8 @@ Desktop.ini
 
 # Logs and local QA scratch (keep latest summaries; ignore bulky/raw logs)
 artifacts/qa/**/logs/
-artifacts/qa/**/screenshots/
+artifacts/qa/**/screenshots/*
+!artifacts/qa/final/screenshots/README.md
 artifacts/qa/**/*.wav
 artifacts/qa/**/*.log
 *.log

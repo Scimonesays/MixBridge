@@ -16,9 +16,6 @@ Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, s
 Icon-first product shell: Sources → Mix → Outputs; engine vs broadcast state separated; real source picker (Input / Application); multi-source cards. **Phase 4.1 complete** — On Air awaits Phase 6 live destination.
 
 ## Phase 5 — VST3
-Filesystem scanner (`mb-vst3-scan`) done. Full load/editor/state awaits pinned VST3 SDK.
-
-## Phase 5 — VST3
 **Hosting core complete** — Guitar Rig 6 proven (`prove-phase5-fx.ps1`, `prove-dual-source-gr.ps1`): load/process/bypass/state/chain/reorder. Editor API present.
 
 ## Phase 6 — Virtual output
