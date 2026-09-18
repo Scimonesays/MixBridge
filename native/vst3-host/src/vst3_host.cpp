@@ -38,6 +38,7 @@ struct Processor::Impl {
   double sample_rate = 0.0;
   int64_t continuous_samples = 0;
   std::atomic<bool> bypass{false};
+  std::atomic<bool> faulted{false};
   bool is_prepared = false;
 
   void deactivate() {
@@ -64,6 +65,7 @@ struct Processor::Impl {
     host_context = nullptr;
     module_path.clear();
     plugin_name.clear();
+    faulted.store(false, std::memory_order_release);
     Steinberg::Vst::PluginContextFactory::instance().setPluginContext(nullptr);
   }
 };
@@ -134,6 +136,7 @@ bool Processor::load(const std::string& module_path, std::string& error) {
   impl_->module_path = module_path;
   impl_->plugin_name = selected.name();
   impl_->bypass.store(false, std::memory_order_release);
+  impl_->faulted.store(false, std::memory_order_release);
   return true;
 }
 
@@ -220,56 +223,75 @@ bool Processor::process(float* interleaved_stereo, uint32_t frames, std::string&
     error = "vst3_invalid_audio_block";
     return false;
   }
-  if (impl_->bypass.load(std::memory_order_acquire)) return true;
-
-  // HostProcessData owns planar float32 channel buffers because prepare() was
-  // called with a non-zero buffer size. Feed every input bus deterministically:
-  // L/R for the first two channels, silence for additional channels.
-  for (Steinberg::int32 bus = 0; bus < impl_->process_data.numInputs; ++bus) {
-    auto& input = impl_->process_data.inputs[bus];
-    input.silenceFlags = 0;
-    for (Steinberg::int32 ch = 0; ch < input.numChannels; ++ch) {
-      float* dst = input.channelBuffers32[ch];
-      if (!dst) continue;
-      for (uint32_t i = 0; i < frames; ++i) {
-        dst[i] = ch < 2 ? interleaved_stereo[i * 2u + static_cast<uint32_t>(ch)] : 0.0f;
-      }
-    }
-  }
-
-  for (Steinberg::int32 bus = 0; bus < impl_->process_data.numOutputs; ++bus) {
-    auto& output = impl_->process_data.outputs[bus];
-    output.silenceFlags = 0;
-    for (Steinberg::int32 ch = 0; ch < output.numChannels; ++ch) {
-      if (output.channelBuffers32[ch]) {
-        std::memset(output.channelBuffers32[ch], 0, sizeof(float) * frames);
-      }
-    }
-  }
-
-  impl_->process_data.numSamples = static_cast<Steinberg::int32>(frames);
-  impl_->process_context.continousTimeSamples = impl_->continuous_samples;
-
-  if (!ok(impl_->processor->process(impl_->process_data))) {
-    error = "vst3_process_failed";
+  if (!process_rt(interleaved_stereo, frames)) {
+    error = impl_->faulted.load(std::memory_order_acquire)
+              ? "vst3_process_faulted"
+              : "vst3_process_failed";
     return false;
-  }
-  impl_->continuous_samples += frames;
-
-  const auto& output = impl_->process_data.outputs[0];
-  if (output.numChannels <= 0 || !output.channelBuffers32 || !output.channelBuffers32[0]) {
-    error = "vst3_output_missing";
-    return false;
-  }
-
-  const float* left = output.channelBuffers32[0];
-  const float* right =
-    output.numChannels > 1 && output.channelBuffers32[1] ? output.channelBuffers32[1] : left;
-  for (uint32_t i = 0; i < frames; ++i) {
-    interleaved_stereo[i * 2u] = left[i];
-    interleaved_stereo[i * 2u + 1u] = right[i];
   }
   return true;
+}
+
+bool Processor::process_rt(float* interleaved_stereo, uint32_t frames) noexcept {
+  if (!impl_->is_prepared || !impl_->processor || !interleaved_stereo ||
+      frames == 0 || frames > impl_->max_block) {
+    return false;
+  }
+  if (impl_->bypass.load(std::memory_order_acquire)) return true;
+  if (impl_->faulted.load(std::memory_order_acquire)) return false;
+
+  try {
+    for (Steinberg::int32 bus = 0; bus < impl_->process_data.numInputs; ++bus) {
+      auto& input = impl_->process_data.inputs[bus];
+      input.silenceFlags = 0;
+      for (Steinberg::int32 ch = 0; ch < input.numChannels; ++ch) {
+        float* dst = input.channelBuffers32[ch];
+        if (!dst) continue;
+        for (uint32_t i = 0; i < frames; ++i) {
+          dst[i] =
+            ch < 2 ? interleaved_stereo[i * 2u + static_cast<uint32_t>(ch)] : 0.0f;
+        }
+      }
+    }
+
+    for (Steinberg::int32 bus = 0; bus < impl_->process_data.numOutputs; ++bus) {
+      auto& output = impl_->process_data.outputs[bus];
+      output.silenceFlags = 0;
+      for (Steinberg::int32 ch = 0; ch < output.numChannels; ++ch) {
+        if (output.channelBuffers32[ch]) {
+          std::memset(output.channelBuffers32[ch], 0, sizeof(float) * frames);
+        }
+      }
+    }
+
+    impl_->process_data.numSamples = static_cast<Steinberg::int32>(frames);
+    impl_->process_context.continousTimeSamples = impl_->continuous_samples;
+
+    if (!ok(impl_->processor->process(impl_->process_data))) {
+      impl_->faulted.store(true, std::memory_order_release);
+      return false;
+    }
+    impl_->continuous_samples += frames;
+
+    const auto& output = impl_->process_data.outputs[0];
+    if (output.numChannels <= 0 || !output.channelBuffers32 ||
+        !output.channelBuffers32[0]) {
+      impl_->faulted.store(true, std::memory_order_release);
+      return false;
+    }
+
+    const float* left = output.channelBuffers32[0];
+    const float* right =
+      output.numChannels > 1 && output.channelBuffers32[1] ? output.channelBuffers32[1] : left;
+    for (uint32_t i = 0; i < frames; ++i) {
+      interleaved_stereo[i * 2u] = left[i];
+      interleaved_stereo[i * 2u + 1u] = right[i];
+    }
+    return true;
+  } catch (...) {
+    impl_->faulted.store(true, std::memory_order_release);
+    return false;
+  }
 }
 
 void Processor::set_bypass(bool bypass) noexcept {
@@ -278,6 +300,10 @@ void Processor::set_bypass(bool bypass) noexcept {
 
 bool Processor::bypass() const noexcept {
   return impl_->bypass.load(std::memory_order_acquire);
+}
+
+bool Processor::faulted() const noexcept {
+  return impl_->faulted.load(std::memory_order_acquire);
 }
 
 bool Processor::loaded() const noexcept {

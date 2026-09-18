@@ -21,9 +21,12 @@ public:
 
   bool prepare(double sample_rate, uint32_t max_block_frames, std::string& error);
   bool process(float* interleaved_stereo, uint32_t frames, std::string& error);
+  // Realtime entry point: no error-string construction, no allocation, no locks.
+  bool process_rt(float* interleaved_stereo, uint32_t frames) noexcept;
 
   void set_bypass(bool bypass) noexcept;
   bool bypass() const noexcept;
+  bool faulted() const noexcept;
   bool loaded() const noexcept;
   bool prepared() const noexcept;
   const std::string& name() const noexcept;
