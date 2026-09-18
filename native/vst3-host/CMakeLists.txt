@@ -24,7 +24,23 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
   set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
   add_subdirectory("${MIXBRIDGE_VST3_SDK}" "${CMAKE_BINARY_DIR}/steinberg-vst3sdk" EXCLUDE_FROM_ALL)
 
-  add_library(mixbridge_vst3_host STATIC src/vst3_host.cpp)
+  add_library(mixbridge_vst3_host STATIC
+    src/vst3_host.cpp
+    "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/plugprovider.cpp"
+  )
+  if(WIN32)
+    target_sources(mixbridge_vst3_host PRIVATE
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/module_win32.cpp"
+    )
+  elseif(APPLE)
+    target_sources(mixbridge_vst3_host PRIVATE
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/module_mac.mm"
+    )
+  else()
+    target_sources(mixbridge_vst3_host PRIVATE
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/module_linux.cpp"
+    )
+  endif()
   target_include_directories(mixbridge_vst3_host
     PUBLIC include
     PRIVATE "${MIXBRIDGE_VST3_SDK}")
