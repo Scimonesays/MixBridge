@@ -23,6 +23,19 @@ target_link_libraries(mixbridge_engine_core PUBLIC
   ole32 uuid mmdevapi avrt ksuser runtimeobject
 )
 
+set(MIXBRIDGE_VST3_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/vst3sdk"
+    CACHE PATH "Path to the pinned Steinberg VST3 SDK checkout")
+if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../vst3-host"
+                   "${CMAKE_BINARY_DIR}/vst3-host" EXCLUDE_FROM_ALL)
+  target_sources(mixbridge_engine_core PRIVATE src/vst3_effect_factory.cpp)
+  target_link_libraries(mixbridge_engine_core PRIVATE mixbridge_vst3_host)
+  target_compile_definitions(mixbridge_engine_core PRIVATE MIXBRIDGE_HAS_VST3=1)
+else()
+  target_sources(mixbridge_engine_core PRIVATE src/vst3_effect_stub.cpp)
+  target_compile_definitions(mixbridge_engine_core PRIVATE MIXBRIDGE_HAS_VST3=0)
+endif()
+
 add_executable(mixbridge_audio_engine src/main.cpp)
 target_link_libraries(mixbridge_audio_engine PRIVATE mixbridge_engine_core)
 

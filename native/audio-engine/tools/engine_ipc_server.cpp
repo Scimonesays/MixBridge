@@ -150,10 +150,13 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       for (const auto& s : sources) {
         char buf[512];
         std::snprintf(buf, sizeof(buf),
-                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d", s.id,
-                      source_kind_name(s.kind), s.name.c_str(), s.gain, s.mute ? 1 : 0,
-                      s.monitor ? 1 : 0, s.broadcast ? 1 : 0);
-        write_line(pipe, buf);
+                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d PROCESS %u FX_BYPASS %d FX_FAULT %d",
+                      s.id, source_kind_name(s.kind), s.name.c_str(), s.gain, s.mute ? 1 : 0,
+                      s.monitor ? 1 : 0, s.broadcast ? 1 : 0, s.process_id,
+                      s.effect_bypass ? 1 : 0, s.effect_faulted ? 1 : 0);
+        std::string line(buf);
+        line += " FX_NAME " + s.effect_name + " FX_PATH " + s.effect_path;
+        write_line(pipe, line);
       }
       write_line(pipe, "OK END");
     } else if (cmd == "START") {
@@ -245,6 +248,25 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       uint32_t id = 0;
       iss >> id;
       if (engine.remove_source(id, err)) write_line(pipe, "OK REMOVED");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "SET_FX") {
+      uint32_t id = 0;
+      iss >> id;
+      std::string path;
+      std::getline(iss >> std::ws, path);
+      while (!path.empty() && (path.back() == ' ' || path.back() == '\t')) path.pop_back();
+      if (engine.set_source_vst3(id, path, err)) write_line(pipe, "OK FX");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "CLEAR_FX") {
+      uint32_t id = 0;
+      iss >> id;
+      if (engine.clear_source_effect(id, err)) write_line(pipe, "OK FX_CLEAR");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "FX_BYPASS") {
+      uint32_t id = 0;
+      int enabled = 0;
+      iss >> id >> enabled;
+      if (engine.set_source_effect_bypass(id, enabled != 0, err)) write_line(pipe, "OK FX_BYPASS");
       else write_line(pipe, "ERR " + err);
     } else if (cmd == "SET_GAIN") {
       uint32_t id = 0;
