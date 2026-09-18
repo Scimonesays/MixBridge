@@ -24,6 +24,7 @@ void process_chunk(
   }
 
   alignas(64) float src_buf[512 * 2];
+  alignas(64) float dry_backup[512 * 2];
 
   for (uint32_t s = 0; s < kMaxSources; ++s) {
     auto& slot = slots[s];
@@ -56,6 +57,14 @@ void process_chunk(
       for (uint32_t i = got; i < need; ++i) src_buf[i] = 0.0f;
     }
 
+    if (auto* effect = slot.effect.load(std::memory_order_acquire)) {
+      std::copy(src_buf, src_buf + need, dry_backup);
+      if (!effect->process(src_buf, frames)) {
+        std::copy(dry_backup, dry_backup + need, src_buf);
+      }
+    }
+
+    // Meter is intentionally post-FX: the source card shows what the user hears.
     slot.meter.accumulate(src_buf, frames, kEngineChannels);
 
     for (uint32_t i = 0; i < frames; ++i) {

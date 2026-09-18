@@ -132,6 +132,7 @@ void Engine::free_slot(int index) {
   if (index < 0 || index >= static_cast<int>(kMaxSources)) return;
   captures_[index].stop();
   slots_[index].active.store(false, std::memory_order_release);
+  slots_[index].effect.store(nullptr, std::memory_order_release);
   slots_[index].ring.clear();
   slots_[index].meter.reset();
   slots_[index].name.clear();
@@ -160,6 +161,7 @@ uint32_t Engine::add_tone(const AddToneRequest& req, std::string& error) {
   slot.id.store(id);
   slot.kind.store(static_cast<uint32_t>(SourceKind::ToneFixture));
   slot.tone_hz.store(req.hz);
+  slot.effect.store(nullptr, std::memory_order_relaxed);
   slot.gain.store(1.0f);
   slot.pan.store(0.0f);
   slot.mute.store(false);
@@ -196,6 +198,7 @@ uint32_t Engine::add_physical_capture(const AddPhysicalRequest& req, std::string
   const uint32_t id = next_id_.fetch_add(1);
   slot.id.store(id);
   slot.kind.store(static_cast<uint32_t>(SourceKind::PhysicalCapture));
+  slot.effect.store(nullptr, std::memory_order_relaxed);
   slot.device_id = wasapi::device_id_string(device);
   if (!req.name.empty()) {
     slot.name = req.name;
@@ -240,6 +243,7 @@ uint32_t Engine::add_process_loopback(const AddProcessRequest& req, std::string&
   slot.id.store(id);
   slot.kind.store(static_cast<uint32_t>(SourceKind::ProcessLoopback));
   slot.process_id.store(req.pid);
+  slot.effect.store(nullptr, std::memory_order_relaxed);
   slot.name = req.name.empty() ? ("pid-" + std::to_string(req.pid)) : req.name;
   slot.gain.store(1.0f);
   slot.mute.store(false);

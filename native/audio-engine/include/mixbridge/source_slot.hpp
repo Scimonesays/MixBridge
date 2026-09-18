@@ -3,6 +3,7 @@
 #include "mixbridge/ring_buffer.hpp"
 #include "mixbridge/types.hpp"
 #include "mixbridge/meters.hpp"
+#include "mixbridge/effect_processor.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -23,6 +24,7 @@ struct SourceSlot {
   std::atomic<bool> broadcast{true};
   std::atomic<float> tone_hz{0.0f};
   std::atomic<uint32_t> process_id{0};
+  std::atomic<RealtimeEffect*> effect{nullptr};
 
   // Non-realtime metadata (do not touch from audio thread).
   std::wstring device_id;
