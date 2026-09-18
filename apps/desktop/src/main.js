@@ -441,6 +441,14 @@ async function showLiveOutputList() {
   pickerRoot.querySelector(".pick-back").addEventListener("click", closePicker);
   try {
     const devices = await invoke("engine_list_render");
+    const rank = (name) => {
+      const n = (name || "").toLowerCase();
+      if (n.includes("mixbridge")) return 0;
+      if (n.includes("cable") || n.includes("vb-audio") || n.includes("voicemeeter")) return 1;
+      if (n.includes("virtual")) return 2;
+      return 3;
+    };
+    devices.sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
     for (const d of devices) {
       const row = document.createElement("button");
       row.type = "button";

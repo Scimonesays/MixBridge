@@ -1,30 +1,35 @@
-﻿# MixBridge QA — Phase 4.1 + 6.1
+﻿# MixBridge QA — continuing toward final acceptance
 
-Date: 2026-09-17T23:40:00Z
+Date: 2026-09-18T00:10:00Z
+Head: local `main` (post Phase 5 FX)
 
-## Phase 3
+## Proven
 
-Gates 3.1–3.12 remain **PASS**.
+| Area | Status | Evidence |
+|------|--------|----------|
+| Phase 3 gates | PASS | prior SUMMARY |
+| Phase 4.1 semantics | PASS | prove-phase41-ipc |
+| Go Live → Live picker when no dest | PASS | UI `needs-attention` + modal |
+| VST3 load/process Guitar Rig 6 | PASS | mb-vst3-process + prove-phase5-fx |
+| FX bypass/state/chain/reorder | PASS | prove-phase5-fx.ps1 |
+| Dual physical+app + GR | see latest run | prove-dual-source-gr.ps1 |
+| Discord Jam save/load | Wired | session.js + Tauri session_* |
+| Live WASAPI destination | PASS | SET_LIVE_DEVICE |
 
-## Phase 4.1
+## External / remaining blockers
 
-All checklist items PASS (`scripts/prove-phase41-ipc.ps1`, `engine_phase41_state_test`).
+| Item | Status |
+|------|--------|
+| `WindowsKernelModeDriver10.0` VS toolset | **BLOCKED** — WDK headers installed; Build Tools lack kernel toolset extension. Cannot compile MixBridge Output SYS yet. |
+| Production EV driver signing | BLOCKED until certificate |
+| Discord E2E manual | Pending once Live dest chosen (virtual cable or MixBridge Output) |
+| Final screenshots / soak / installer | In progress |
 
-## Phase 6.1 — Live WASAPI destination
+## Workaround for Discord today
 
-| Check | Status | Evidence |
-|-------|--------|----------|
-| No On Air without destination | PASS | LIVE_DEST 0 → `no_live_destination` |
-| Select live render device | PASS | `SET_LIVE_DEVICE` + LIST_RENDER |
-| Go Live enables broadcast sink | PASS | BROADCAST live; engine stays running |
-| Standby keeps monitor | PASS | BROADCAST standby + STATE running |
-| First-party MixBridge VAD | BLOCKED | WDK not installed — see `native/driver/README.md` |
+1. Install VB-CABLE (or similar) externally if desired.
+2. MixBridge Live → select CABLE Input (render).
+3. Discord Input → CABLE Output (capture).
+4. Go Live.
 
-Honest note: Live path today renders the broadcast bus to a **user-selected WASAPI render endpoint** (e.g. installed virtual cable). Discord sees that endpoint, not a branded MixBridge Output until the WDK driver ships.
-
-## Commands
-
-```text
-ctest --test-dir native/audio-engine/build --output-on-failure
-powershell -File scripts/prove-phase41-ipc.ps1
-```
+First-party **MixBridge Output** replaces steps 1–3 when the WDK toolset is available.
