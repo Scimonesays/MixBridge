@@ -4,7 +4,7 @@
 
 Route a guitar or microphone, an application such as Chrome, and a VST3 effect into one simple live mix. Monitor it locally, then send that same mix to a real Windows Live output for Discord, OBS, meetings, games, or recording.
 
-![MixBridge UI preview](docs/images/mixbridge-ui-preview.jpg)
+![MixBridge UI preview](docs/images/mixbridge-ui-preview.svg)
 
 > UI preview rendered from the production MixBridge desktop shell with a representative saved session. Hardware acceptance screenshots remain separate evidence.
 
