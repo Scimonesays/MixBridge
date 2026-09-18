@@ -14,7 +14,7 @@ const btnAdd = document.getElementById("btn-add");
 const picker = document.getElementById("picker");
 const pickerRoot = document.getElementById("picker-root");
 
-/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string}>} */
+/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean}>} */
 const sources = new Map();
 
 let onAir = false;
@@ -36,6 +36,8 @@ const ICON = {
   broadcast: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-5.5-1.5a1 1 0 0 1 1.4 1.45 4 4 0 0 0 0 5.7 1 1 0 1 1-1.4 1.4 6 6 0 0 1 0-8.55zm11 0a6 6 0 0 1 0 8.55 1 1 0 1 1-1.4-1.4 4 4 0 0 0 0-5.7 1 1 0 0 1 1.4-1.45z"/></svg>`,
   mute: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 9v6h4l5 5V4L9 9H5zm12.5 3a4.5 4.5 0 0 0-2.5-4.03v8.06A4.5 4.5 0 0 0 17.5 12z"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v10h-2V9zm4 0h2v10h-2V9zM7 9h2v10H7V9z"/></svg>`,
+  fx: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 2h2v5h4V2h2v5h2v5a6 6 0 0 1-5 5.92V22h-2v-4.08A6 6 0 0 1 6 12V7h2V2zm0 7v3a4 4 0 0 0 8 0V9H8z"/></svg>`,
+  power: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 2h2v10h-2V2zm-4.95 3.64 1.41 1.42A7 7 0 1 0 16.54 7l1.41-1.42A9 9 0 1 1 6.05 5.64z"/></svg>`,
   back: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14.7 5.3 8 12l6.7 6.7 1.4-1.4L10.8 12l5.3-5.3-1.4-1.4z"/></svg>`,
 };
 
@@ -51,8 +53,13 @@ function setMeterWidth(el, peak) {
 
 function setMeterVertical(el, peak) {
   const pct = Math.min(100, Math.round((peak || 0) * 140));
-  el.style.height = `${pct}%`;
-  el.style.width = "100%";
+  if (window.matchMedia("(max-width: 720px)").matches) {
+    el.style.width = `${pct}%`;
+    el.style.height = "100%";
+  } else {
+    el.style.height = `${pct}%`;
+    el.style.width = "100%";
+  }
   return pct;
 }
 
@@ -93,6 +100,12 @@ function sessionKey(s) {
   return s.kind + ":" + (s.name || "");
 }
 
+function pluginNameFromPath(path) {
+  const normalized = String(path || "").replace(/\\/g, "/");
+  const tail = normalized.split("/").pop() || "VST3";
+  return tail.replace(/\.vst3$/i, "");
+}
+
 function sourceToSession(src) {
   return {
     kind: src.kind,
@@ -103,7 +116,7 @@ function sourceToSession(src) {
     mute: src.mute,
     monitor: src.monitor,
     broadcast: src.broadcast,
-    fx: [],
+    fx: src.effectPath ? [src.effectPath] : [],
   };
 }
 
@@ -144,6 +157,9 @@ async function applySourceSettings(id, cfg) {
   await invoke("engine_set_mute", { id, mute: !!cfg.mute });
   await invoke("engine_set_monitor", { id, enabled: cfg.monitor !== false });
   await invoke("engine_set_broadcast", { id, enabled: cfg.broadcast !== false });
+  if (Array.isArray(cfg.fx) && cfg.fx[0]) {
+    await invoke("engine_set_vst3", { id, modulePath: cfg.fx[0] });
+  }
 }
 
 async function tryRestorePendingSources() {
@@ -175,6 +191,8 @@ async function tryRestorePendingSources() {
             monitor: cfg.monitor !== false,
             broadcast: cfg.broadcast !== false,
             deviceId: device.id,
+            effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
+            effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
           });
           continue;
         }
@@ -198,6 +216,8 @@ async function tryRestorePendingSources() {
             monitor: cfg.monitor !== false,
             broadcast: cfg.broadcast !== false,
             processName: label,
+            effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
+            effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
           });
           continue;
         }
@@ -272,12 +292,18 @@ function renderSources() {
       <div class="meter-wrap" aria-hidden="true"><div class="meter source-meter" data-meter="${src.id}"></div></div>
       <div class="source-actions">
         <button type="button" class="icon-btn tiny btn-mute ${src.mute ? "danger active" : ""}" title="Mute" aria-label="Mute" aria-pressed="${src.mute}">${ICON.mute}</button>
+        <button type="button" class="icon-btn tiny btn-fx ${src.effectPath ? "active" : ""} ${src.effectFaulted ? "danger" : ""}" title="${src.effectName || "Effects"}" aria-label="Effects" aria-pressed="${!!src.effectPath}">${ICON.fx}</button>
         <input type="range" min="0" max="200" value="${Math.round(src.gain * 100)}" title="Level" aria-label="Level" class="gain" />
         <button type="button" class="icon-btn tiny btn-mon ${src.monitor ? "active" : ""}" title="Monitor" aria-label="Monitor" aria-pressed="${src.monitor}">${ICON.headphones}</button>
         <button type="button" class="icon-btn tiny btn-bc ${src.broadcast ? "active" : ""}" title="Live route" aria-label="Live route" aria-pressed="${src.broadcast}">${ICON.broadcast}</button>
         <button type="button" class="icon-btn tiny ghost btn-trash" title="Remove" aria-label="Remove">${ICON.trash}</button>
       </div>
     `;
+
+    card.querySelector(".btn-fx").addEventListener("click", async () => {
+      await showEffectList(src);
+      if (!picker.open) picker.showModal();
+    });
 
     card.querySelector(".btn-mute").addEventListener("click", async () => {
       const next = !src.mute;
@@ -351,6 +377,10 @@ function upsertSource(dto) {
     gain: typeof dto.gain === "number" ? dto.gain : 1,
     deviceId: dto.deviceId ?? previous.deviceId,
     processName: dto.processName ?? previous.processName,
+    effectName: dto.effect_name ?? dto.effectName ?? previous.effectName ?? "",
+    effectPath: dto.effect_path ?? dto.effectPath ?? previous.effectPath ?? "",
+    effectBypass: dto.effect_bypass ?? dto.effectBypass ?? previous.effectBypass ?? false,
+    effectFaulted: dto.effect_faulted ?? dto.effectFaulted ?? previous.effectFaulted ?? false,
   });
 }
 
@@ -456,6 +486,82 @@ async function showProcessList() {
             gain: 1,
             processName: label,
           });
+          renderSources();
+          scheduleSessionSave();
+          closePicker();
+          showError("");
+        } catch (e) {
+          showError(String(e));
+        }
+      });
+      pickerRoot.appendChild(row);
+    }
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+async function showEffectList(src) {
+  pickerRoot.className = "pick-list";
+  pickerRoot.innerHTML = `<button type="button" class="icon-btn tiny pick-back" title="Back" aria-label="Back">${ICON.back}</button>`;
+  pickerRoot.querySelector(".pick-back").addEventListener("click", closePicker);
+
+  if (src.effectPath) {
+    const current = document.createElement("div");
+    current.className = `fx-current ${src.effectFaulted ? "faulted" : ""}`;
+    current.innerHTML = `
+      <div class="fx-current-name">${ICON.fx}<span>${src.effectName || pluginNameFromPath(src.effectPath)}</span></div>
+      <div class="fx-current-actions">
+        <button type="button" class="icon-btn tiny fx-bypass ${src.effectBypass ? "" : "active"}" title="Bypass" aria-label="Bypass effect" aria-pressed="${!!src.effectBypass}">${ICON.power}</button>
+        <button type="button" class="icon-btn tiny ghost fx-clear" title="Remove effect" aria-label="Remove effect">${ICON.trash}</button>
+      </div>`;
+    current.querySelector(".fx-bypass").addEventListener("click", async () => {
+      const next = !src.effectBypass;
+      try {
+        await invoke("engine_set_vst3_bypass", { id: src.id, bypass: next });
+        src.effectBypass = next;
+        renderSources();
+        scheduleSessionSave();
+        await showEffectList(src);
+      } catch (e) {
+        showError(String(e));
+      }
+    });
+    current.querySelector(".fx-clear").addEventListener("click", async () => {
+      try {
+        await invoke("engine_clear_vst3", { id: src.id });
+        src.effectName = "";
+        src.effectPath = "";
+        src.effectBypass = false;
+        src.effectFaulted = false;
+        renderSources();
+        scheduleSessionSave();
+        closePicker();
+        showError("");
+      } catch (e) {
+        showError(String(e));
+      }
+    });
+    pickerRoot.appendChild(current);
+  }
+
+  try {
+    const plugins = await invoke("vst3_list", { refresh: false });
+    for (const plugin of plugins) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "pick-row";
+      row.title = plugin.name;
+      row.setAttribute("aria-label", plugin.name);
+      row.innerHTML = `${ICON.fx}<span>${plugin.name}</span>`;
+      if (plugin.path === src.effectPath) row.classList.add("selected");
+      row.addEventListener("click", async () => {
+        try {
+          await invoke("engine_set_vst3", { id: src.id, modulePath: plugin.path });
+          src.effectName = plugin.name;
+          src.effectPath = plugin.path;
+          src.effectBypass = false;
+          src.effectFaulted = false;
           renderSources();
           scheduleSessionSave();
           closePicker();

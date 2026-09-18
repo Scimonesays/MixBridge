@@ -276,7 +276,8 @@ html, body {
 .icon-btn.active {
   box-shadow: 0 0 0 1px rgba(59, 184, 239, 0.5), 0 0 12px rgba(59, 184, 239, 0.2);
 }
-.icon-btn.danger.active {
+.icon-btn.danger.active,
+.icon-btn.danger {
   box-shadow: 0 0 0 1px rgba(230, 53, 85, 0.55), 0 0 12px rgba(230, 53, 85, 0.22);
 }
 .icon-btn.ghost {
@@ -388,9 +389,48 @@ html, body {
   cursor: pointer;
 }
 .pick-row:hover { border-color: rgba(59, 184, 239, 0.35); }
+.pick-row.selected {
+  border-color: rgba(59, 184, 239, 0.55);
+  background: rgba(59, 184, 239, 0.08);
+}
 .pick-row svg { width: 20px; height: 20px; color: var(--cyan); flex: 0 0 auto; }
 .pick-back {
   margin-bottom: 0.35rem;
+}
+
+.fx-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.75rem;
+  margin-bottom: 0.3rem;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 184, 239, 0.28);
+  background: rgba(59, 184, 239, 0.06);
+}
+.fx-current.faulted {
+  border-color: rgba(230, 53, 85, 0.6);
+  box-shadow: 0 0 14px rgba(230, 53, 85, 0.14);
+}
+.fx-current-name,
+.fx-current-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.fx-current-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+.fx-current-name svg {
+  width: 20px;
+  height: 20px;
+  color: var(--cyan);
+  flex: 0 0 auto;
 }
 
 .status {
