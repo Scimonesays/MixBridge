@@ -1,6 +1,8 @@
 #include "mixbridge/vst3_scan.hpp"
 
 #include <algorithm>
+#include <cstdlib>
+#include <optional>
 
 namespace mixbridge::vst3 {
 namespace {
@@ -9,6 +11,20 @@ std::string stem_name(const std::filesystem::path& p) {
   auto s = p.stem().string();
   if (s.size() > 5 && s.ends_with(".vst3")) s.resize(s.size() - 5);
   return s;
+}
+
+std::optional<std::string> env_value(const char* name) {
+#ifdef _WIN32
+  char* value = nullptr;
+  size_t len = 0;
+  if (_dupenv_s(&value, &len, name) != 0 || !value) return std::nullopt;
+  std::string result(value);
+  std::free(value);
+  return result;
+#else
+  if (const char* value = std::getenv(name)) return std::string(value);
+  return std::nullopt;
+#endif
 }
 
 void scan_recursive(const std::filesystem::path& root, std::vector<PluginEntry>& out) {
@@ -53,14 +69,14 @@ std::vector<PluginEntry> scan_default_folders() {
   };
   for (const char* p : locals) scan_recursive(p, out);
 
-  if (const char* pf = std::getenv("ProgramFiles")) {
-    scan_recursive(std::filesystem::path(pf) / "Common Files" / "VST3", out);
+  if (auto pf = env_value("ProgramFiles")) {
+    scan_recursive(std::filesystem::path(*pf) / "Common Files" / "VST3", out);
   }
-  if (const char* pd = std::getenv("ProgramData")) {
-    scan_recursive(std::filesystem::path(pd) / "VST3", out);
+  if (auto pd = env_value("ProgramData")) {
+    scan_recursive(std::filesystem::path(*pd) / "VST3", out);
   }
-  if (const char* la = std::getenv("LOCALAPPDATA")) {
-    scan_recursive(std::filesystem::path(la) / "VST3", out);
+  if (auto la = env_value("LOCALAPPDATA")) {
+    scan_recursive(std::filesystem::path(*la) / "VST3", out);
   }
 
   std::sort(out.begin(), out.end(),
