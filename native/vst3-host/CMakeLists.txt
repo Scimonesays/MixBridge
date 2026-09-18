@@ -51,6 +51,9 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
 
   option(MIXBRIDGE_BUILD_VST3_FIXTURE "Build Steinberg AGain fixture for host verification" OFF)
   if(MIXBRIDGE_BUILD_VST3_FIXTURE)
+    if(NOT DEFINED vstsdk_VERSION)
+      set(vstsdk_VERSION "3.7.12")
+    endif()
     add_subdirectory(
       "${MIXBRIDGE_VST3_SDK}/public.sdk/samples/vst/again_sampleaccurate"
       "${CMAKE_BINARY_DIR}/mixbridge-vst3-fixture"
