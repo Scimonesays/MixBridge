@@ -36,10 +36,25 @@ jobs:
           ctest --test-dir native/audio-engine/build -C Release --output-on-failure
       - name: Configure VST3 host
         shell: pwsh
-        run: cmake -S native/vst3-host -B native/vst3-host/build
+        run: cmake -S native/vst3-host -B native/vst3-host/build -DMIXBRIDGE_BUILD_VST3_FIXTURE=ON
       - name: Build VST3 host + scanner
         shell: pwsh
         run: cmake --build native/vst3-host/build --config Release
+      - name: Build deterministic VST3 fixture
+        shell: pwsh
+        run: cmake --build native/vst3-host/build --config Release --target again-sample-accurate
+      - name: Prove VST3 load and audio processing
+        shell: pwsh
+        run: |
+          $plugin = Get-ChildItem native/vst3-host/build -Recurse -Filter *.vst3 |
+            Where-Object { $_.FullName -match 'again-sample-accurate' } |
+            Select-Object -First 1
+          if (-not $plugin) { throw "again-sample-accurate.vst3 not found" }
+          $probe = Get-ChildItem native/vst3-host/build -Recurse -Filter mb-vst3-probe.exe |
+            Select-Object -First 1
+          if (-not $probe) { throw "mb-vst3-probe.exe not found" }
+          & $probe.FullName $plugin.FullName
+          if ($LASTEXITCODE -ne 0) { throw "VST3 processing probe failed" }
       - name: Desktop frontend build
         working-directory: apps/desktop
         shell: pwsh

@@ -48,6 +48,15 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
 
   add_executable(mb-vst3-probe tools/vst3_probe_main.cpp)
   target_link_libraries(mb-vst3-probe PRIVATE mixbridge_vst3_host)
+
+  option(MIXBRIDGE_BUILD_VST3_FIXTURE "Build Steinberg AGain fixture for host verification" OFF)
+  if(MIXBRIDGE_BUILD_VST3_FIXTURE)
+    add_subdirectory(
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/samples/vst/again_sampleaccurate"
+      "${CMAKE_BINARY_DIR}/mixbridge-vst3-fixture"
+      EXCLUDE_FROM_ALL
+    )
+  endif()
 else()
   message(STATUS "MixBridge VST3 SDK not present; scanner-only build. Run scripts/fetch-vst3sdk.ps1.")
 endif()
