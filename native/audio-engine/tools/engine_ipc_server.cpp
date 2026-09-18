@@ -154,9 +154,9 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
                       s.id, source_kind_name(s.kind), s.name.c_str(), s.gain, s.mute ? 1 : 0,
                       s.monitor ? 1 : 0, s.broadcast ? 1 : 0, s.process_id,
                       s.effect_bypass ? 1 : 0, s.effect_faulted ? 1 : 0);
-        std::string line(buf);
-        line += " FX_NAME " + s.effect_name + " FX_PATH " + s.effect_path;
-        write_line(pipe, line);
+        std::string source_line(buf);
+        source_line += " FX_NAME " + s.effect_name + " FX_PATH " + s.effect_path;
+        write_line(pipe, source_line);
       }
       write_line(pipe, "OK END");
     } else if (cmd == "START") {
