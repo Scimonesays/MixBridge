@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string_view>
@@ -33,7 +34,7 @@ public:
     std::vector<uint8_t> controller;
     if (!processor_.save_state(component, controller, error)) return false;
 
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    std::ofstream out(std::filesystem::u8path(path), std::ios::binary | std::ios::trunc);
     if (!out) {
       error = "effect_state_open_write_failed";
       return false;
@@ -60,7 +61,7 @@ public:
   }
 
   bool load_state_file(const std::string& path, std::string& error) override {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
     if (!in) {
       error = "effect_state_open_read_failed";
       return false;
