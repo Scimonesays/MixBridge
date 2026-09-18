@@ -264,12 +264,28 @@ fn ensure_engine_process(app: &tauri::AppHandle) -> Result<(), String> {
   }
 
   let mut candidates = Vec::new();
+  if let Some(override_path) = std::env::var_os("MIXBRIDGE_ENGINE_PATH") {
+    candidates.push(PathBuf::from(override_path));
+  }
   if let Ok(resource) = app.path().resource_dir() {
     candidates.push(resource.join("mb-engine-ipc.exe"));
   }
-  candidates.push(std::path::PathBuf::from(
-    r"C:\Users\scimo\Documents\CODE\MixBridge\native\audio-engine\build\mb-engine-ipc.exe",
-  ));
+  if let Ok(cwd) = std::env::current_dir() {
+    candidates.push(cwd.join("native").join("audio-engine").join("build").join("Release").join("mb-engine-ipc.exe"));
+    candidates.push(cwd.join("native").join("audio-engine").join("build").join("mb-engine-ipc.exe"));
+  }
+  let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+  candidates.push(
+    manifest_root
+      .join("..")
+      .join("..")
+      .join("..")
+      .join("native")
+      .join("audio-engine")
+      .join("build")
+      .join("Release")
+      .join("mb-engine-ipc.exe"),
+  );
 
   let mut started = None;
   for c in candidates {

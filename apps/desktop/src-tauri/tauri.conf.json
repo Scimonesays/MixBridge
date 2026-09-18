@@ -26,12 +26,23 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "icon": [
       "icons/icon.ico",
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png"
-    ]
+    ],
+    "targets": [
+      "nsis"
+    ],
+    "resources": {
+      "../../../native/audio-engine/build/Release/mb-engine-ipc.exe": "mb-engine-ipc.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
