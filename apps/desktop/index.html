@@ -44,11 +44,11 @@
         <section class="col outputs" aria-labelledby="lbl-outputs">
           <h2 id="lbl-outputs" class="col-title">Outputs</h2>
           <div class="stack">
-            <div class="dest-card" data-route="monitor" title="Monitor">
+            <div id="monitor-route" class="dest-card selected" data-route="monitor" title="Monitor" role="button" tabindex="0" aria-label="Choose monitor output">
               <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="currentColor" d="M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h2v-8H5a7 7 0 0 1 14 0h-2v8h2a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z"/>
               </svg>
-              <span class="route-tag">Monitor</span>
+              <span id="monitor-route-label" class="route-tag">Monitor</span>
               <div class="meter-wrap thin" aria-hidden="true"><div id="monitor-meter" class="meter"></div></div>
             </div>
             <div id="live-route" class="dest-card dim" data-route="live" title="Live" role="button" tabindex="0" aria-label="Choose live output">

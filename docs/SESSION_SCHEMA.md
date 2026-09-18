@@ -1,6 +1,8 @@
-# Session / preset foundation (Phase 7 start)
+# Session / preset foundation
 
-Schema version 1. Persistence target: local JSON under the user config directory.
+Schema version 1. MixBridge now persists the last working setup locally as JSON under the Tauri application config directory.
+
+The product default is a quiet auto-save/auto-restore flow: source/device choices and levels are remembered without adding helper copy to the main UI. Process sources are restored by application name when the application is available; unavailable applications remain pending and are retried while MixBridge is open.
 
 ```json
 {
@@ -12,6 +14,7 @@ Schema version 1. Persistence target: local JSON under the user config directory
     {
       "kind": "physical",
       "device_id": "",
+      "process_name": null,
       "name": "Fireface 1/2",
       "gain": 1.0,
       "mute": false,
@@ -21,7 +24,8 @@ Schema version 1. Persistence target: local JSON under the user config directory
     },
     {
       "kind": "process",
-      "process_name": "chrome",
+      "device_id": null,
+      "process_name": "Chrome",
       "name": "Chrome",
       "gain": 0.8,
       "mute": false,
@@ -33,4 +37,9 @@ Schema version 1. Persistence target: local JSON under the user config directory
 }
 ```
 
-Not implemented in the UI yet — shape reserved so Phase 4 source state can map cleanly.
+Current behavior:
+- monitor and live destination IDs persist;
+- physical sources restore by endpoint ID, with friendly-name fallback;
+- application sources restore by process name and retry when the app starts later;
+- gain, mute, monitor route, and broadcast route persist;
+- `fx` is reserved for Phase 5 plugin-chain persistence.

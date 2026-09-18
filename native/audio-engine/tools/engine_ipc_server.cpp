@@ -178,6 +178,44 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       while (!id_utf8.empty() && (id_utf8.back() == ' ' || id_utf8.back() == '\t')) id_utf8.pop_back();
       if (engine.set_live_device(utf8_to_wide(id_utf8), err)) write_line(pipe, "OK LIVE_DEST");
       else write_line(pipe, "ERR " + err);
+    } else if (cmd == "SET_MONITOR_DEVICE") {
+      std::string id_utf8;
+      std::getline(iss >> std::ws, id_utf8);
+      while (!id_utf8.empty() && (id_utf8.back() == ' ' || id_utf8.back() == '\t')) id_utf8.pop_back();
+
+      const auto before = engine.state();
+      const bool was_running =
+        before == mixbridge::EngineState::Running || before == mixbridge::EngineState::Starting;
+      const bool was_live = engine.broadcast_state() == mixbridge::BroadcastState::Live;
+
+      if (was_running) engine.stop();
+
+      std::string set_error;
+      if (!engine.set_monitor_device(utf8_to_wide(id_utf8), set_error)) {
+        if (was_running) {
+          std::string recover_error;
+          engine.start(recover_error);
+        }
+        write_line(pipe, "ERR " + set_error);
+        continue;
+      }
+
+      if (was_running) {
+        std::string start_error;
+        if (!engine.start(start_error)) {
+          write_line(pipe, "ERR " + start_error);
+          continue;
+        }
+      }
+
+      if (was_live && engine.live_destination_ready()) {
+        std::string live_error;
+        if (!engine.enable_broadcast(live_error)) {
+          write_line(pipe, "ERR monitor_changed_live_restore_" + live_error);
+          continue;
+        }
+      }
+      write_line(pipe, "OK MONITOR_DEST");
     } else if (cmd == "ADD_TONE") {
       float hz = 440.0f;
       iss >> hz;

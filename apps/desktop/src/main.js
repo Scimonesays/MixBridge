@@ -1,6 +1,8 @@
 const airBadge = document.getElementById("air-badge");
 const meterEl = document.getElementById("meter");
 const monitorMeterEl = document.getElementById("monitor-meter");
+const monitorRoute = document.getElementById("monitor-route");
+const monitorRouteLabel = document.getElementById("monitor-route-label");
 const liveMeterEl = document.getElementById("live-meter");
 const liveRoute = document.getElementById("live-route");
 const liveRouteLabel = document.getElementById("live-route-label");
@@ -12,13 +14,20 @@ const btnAdd = document.getElementById("btn-add");
 const picker = document.getElementById("picker");
 const pickerRoot = document.getElementById("picker-root");
 
-/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number}>} */
+/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string}>} */
 const sources = new Map();
 
 let onAir = false;
 let liveDestReady = false;
 let liveDestName = "";
+let liveDestId = "";
+let monitorDestName = "Monitor";
+let monitorDestId = "";
 let engineOnline = false;
+let restoringSession = false;
+let restoreInFlight = false;
+let sessionSaveTimer = null;
+let pendingRestores = [];
 
 const ICON = {
   mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12z"/></svg>`,
@@ -74,6 +83,176 @@ async function invoke(cmd, args = {}) {
   return invoke(cmd, args);
 }
 
+function normalizeProcessName(name) {
+  return String(name || "").replace(/\.exe$/i, "").trim().toLowerCase();
+}
+
+function sessionKey(s) {
+  if (s.kind === "physical") return "physical:" + (s.device_id || s.deviceId || s.name || "");
+  if (s.kind === "process") return "process:" + normalizeProcessName(s.process_name || s.processName || s.name);
+  return s.kind + ":" + (s.name || "");
+}
+
+function sourceToSession(src) {
+  return {
+    kind: src.kind,
+    name: src.name,
+    device_id: src.deviceId || null,
+    process_name: src.processName || null,
+    gain: src.gain,
+    mute: src.mute,
+    monitor: src.monitor,
+    broadcast: src.broadcast,
+    fx: [],
+  };
+}
+
+function buildSession() {
+  const active = [...sources.values()]
+    .filter((src) => src.kind === "physical" || src.kind === "process")
+    .map(sourceToSession);
+  const seen = new Set(active.map(sessionKey));
+  for (const pending of pendingRestores) {
+    if (!seen.has(sessionKey(pending))) active.push(pending);
+  }
+  return {
+    version: 1,
+    name: "Discord Jam",
+    monitor_device_id: monitorDestId,
+    live_device_id: liveDestId,
+    sources: active,
+  };
+}
+
+async function saveSessionNow() {
+  if (restoringSession) return;
+  try {
+    await invoke("session_save", { session: buildSession() });
+  } catch (e) {
+    console.warn("MixBridge session save failed", e);
+  }
+}
+
+function scheduleSessionSave() {
+  if (restoringSession) return;
+  clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(saveSessionNow, 250);
+}
+
+async function applySourceSettings(id, cfg) {
+  await invoke("engine_set_gain", { id, gain: Number(cfg.gain ?? 1) });
+  await invoke("engine_set_mute", { id, mute: !!cfg.mute });
+  await invoke("engine_set_monitor", { id, enabled: cfg.monitor !== false });
+  await invoke("engine_set_broadcast", { id, enabled: cfg.broadcast !== false });
+}
+
+async function tryRestorePendingSources() {
+  if (restoreInFlight || pendingRestores.length === 0) return;
+  restoreInFlight = true;
+  try {
+    const devices = await invoke("engine_list_capture");
+    const processes = await invoke("engine_list_processes");
+    const remaining = [];
+
+    for (const cfg of pendingRestores) {
+      try {
+        if (cfg.kind === "physical") {
+          const device =
+            devices.find((d) => cfg.device_id && d.id === cfg.device_id) ||
+            devices.find((d) => d.name === cfg.name);
+          if (!device) {
+            remaining.push(cfg);
+            continue;
+          }
+          const res = await invoke("engine_add_physical", { deviceId: device.id });
+          await applySourceSettings(res.id, cfg);
+          upsertSource({
+            id: res.id,
+            kind: "physical",
+            name: cfg.name || device.name,
+            gain: Number(cfg.gain ?? 1),
+            mute: !!cfg.mute,
+            monitor: cfg.monitor !== false,
+            broadcast: cfg.broadcast !== false,
+            deviceId: device.id,
+          });
+          continue;
+        }
+
+        if (cfg.kind === "process") {
+          const wanted = normalizeProcessName(cfg.process_name || cfg.name);
+          const process = processes.find((p) => normalizeProcessName(p.name) === wanted);
+          if (!process) {
+            remaining.push(cfg);
+            continue;
+          }
+          const label = String(process.name).replace(/\.exe$/i, "");
+          const res = await invoke("engine_add_process", { pid: process.pid, name: label });
+          await applySourceSettings(res.id, cfg);
+          upsertSource({
+            id: res.id,
+            kind: "process",
+            name: cfg.name || label,
+            gain: Number(cfg.gain ?? 1),
+            mute: !!cfg.mute,
+            monitor: cfg.monitor !== false,
+            broadcast: cfg.broadcast !== false,
+            processName: label,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.warn("MixBridge source restore deferred", e);
+      }
+      remaining.push(cfg);
+    }
+
+    pendingRestores = remaining;
+    renderSources();
+  } finally {
+    restoreInFlight = false;
+  }
+}
+
+async function restoreLastSession() {
+  restoringSession = true;
+  try {
+    const session = await invoke("session_load");
+    if (!session) return;
+
+    const renderDevices = await invoke("engine_list_render");
+    if (session.monitor_device_id) {
+      const monitor = renderDevices.find((d) => d.id === session.monitor_device_id);
+      if (monitor) {
+        await invoke("engine_set_monitor_device", { deviceId: monitor.id });
+        monitorDestId = monitor.id;
+        monitorDestName = monitor.name;
+        monitorRouteLabel.textContent = monitor.name;
+        monitorRoute.title = "Monitor · " + monitor.name;
+      }
+    }
+
+    if (session.live_device_id) {
+      const live = renderDevices.find((d) => d.id === session.live_device_id);
+      if (live) {
+        await invoke("engine_set_live_device", { deviceId: live.id });
+        liveDestId = live.id;
+        liveDestName = live.name;
+        liveDestReady = true;
+        liveRouteLabel.textContent = live.name;
+        liveRoute.title = "Live · " + live.name;
+      }
+    }
+
+    pendingRestores = Array.isArray(session.sources) ? session.sources.slice() : [];
+    await tryRestorePendingSources();
+  } catch (e) {
+    console.warn("MixBridge session restore failed", e);
+  } finally {
+    restoringSession = false;
+  }
+}
+
 function glyphForKind(kind) {
   if (kind === "process") return ICON.app;
   return ICON.mic;
@@ -106,6 +285,7 @@ function renderSources() {
         await invoke("engine_set_mute", { id: src.id, mute: next });
         src.mute = next;
         renderSources();
+        scheduleSessionSave();
       } catch (e) {
         showError(String(e));
       }
@@ -115,6 +295,7 @@ function renderSources() {
       src.gain = gain;
       try {
         await invoke("engine_set_gain", { id: src.id, gain });
+        scheduleSessionSave();
       } catch (e) {
         showError(String(e));
       }
@@ -125,6 +306,7 @@ function renderSources() {
         await invoke("engine_set_monitor", { id: src.id, enabled: next });
         src.monitor = next;
         renderSources();
+        scheduleSessionSave();
       } catch (e) {
         showError(String(e));
       }
@@ -135,6 +317,7 @@ function renderSources() {
         await invoke("engine_set_broadcast", { id: src.id, enabled: next });
         src.broadcast = next;
         renderSources();
+        scheduleSessionSave();
       } catch (e) {
         showError(String(e));
       }
@@ -144,6 +327,7 @@ function renderSources() {
         await invoke("engine_remove_source", { id: src.id });
         sources.delete(src.id);
         renderSources();
+        scheduleSessionSave();
         showError("");
       } catch (e) {
         showError(String(e));
@@ -155,7 +339,9 @@ function renderSources() {
 }
 
 function upsertSource(dto) {
+  const previous = sources.get(dto.id) || {};
   sources.set(dto.id, {
+    ...previous,
     id: dto.id,
     kind: dto.kind,
     name: dto.name,
@@ -163,6 +349,8 @@ function upsertSource(dto) {
     monitor: dto.monitor !== false,
     broadcast: dto.broadcast !== false,
     gain: typeof dto.gain === "number" ? dto.gain : 1,
+    deviceId: dto.deviceId ?? previous.deviceId,
+    processName: dto.processName ?? previous.processName,
   });
 }
 
@@ -224,8 +412,10 @@ async function showPhysicalList() {
             monitor: true,
             broadcast: true,
             gain: 1,
+            deviceId: d.id,
           });
           renderSources();
+          scheduleSessionSave();
           closePicker();
           showError("");
         } catch (e) {
@@ -264,8 +454,10 @@ async function showProcessList() {
             monitor: true,
             broadcast: true,
             gain: 1,
+            processName: label,
           });
           renderSources();
+          scheduleSessionSave();
           closePicker();
           showError("");
         } catch (e) {
@@ -295,9 +487,13 @@ async function showLiveOutputList() {
       row.addEventListener("click", async () => {
         try {
           await invoke("engine_set_live_device", { deviceId: d.id });
+          liveDestId = d.id;
           liveDestName = d.name;
           liveDestReady = true;
-          liveRoute.classList.remove("unavailable");
+          liveRouteLabel.textContent = d.name;
+          liveRoute.title = `Live · ${d.name}`;
+          liveRoute.classList.remove("unavailable", "attention");
+          scheduleSessionSave();
           closePicker();
           showError("");
           await refreshStatus();
@@ -311,6 +507,53 @@ async function showLiveOutputList() {
     showError(String(e));
   }
 }
+
+async function showMonitorOutputList() {
+  pickerRoot.className = "pick-list";
+  pickerRoot.innerHTML = `<button type="button" class="icon-btn tiny pick-back" title="Back" aria-label="Back">${ICON.back}</button>`;
+  pickerRoot.querySelector(".pick-back").addEventListener("click", closePicker);
+  try {
+    const devices = await invoke("engine_list_render");
+    for (const d of devices) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "pick-row";
+      row.title = d.name;
+      row.setAttribute("aria-label", d.name);
+      row.innerHTML = `${ICON.headphones}<span>${d.name}</span>`;
+      row.addEventListener("click", async () => {
+        try {
+          await invoke("engine_set_monitor_device", { deviceId: d.id });
+          monitorDestId = d.id;
+          monitorDestName = d.name;
+          monitorRouteLabel.textContent = d.name;
+          monitorRoute.title = `Monitor · ${d.name}`;
+          monitorRoute.classList.add("selected");
+          scheduleSessionSave();
+          closePicker();
+          showError("");
+          await refreshStatus();
+        } catch (e) {
+          showError(String(e));
+        }
+      });
+      pickerRoot.appendChild(row);
+    }
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+monitorRoute.addEventListener("click", () => {
+  showMonitorOutputList();
+  picker.showModal();
+});
+monitorRoute.addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" || ev.key === " ") {
+    ev.preventDefault();
+    monitorRoute.click();
+  }
+});
 
 liveRoute.addEventListener("click", () => {
   showLiveOutputList();
@@ -343,6 +586,13 @@ btnLive.addEventListener("click", async () => {
     }
     // Ensure monitor engine stays running; Go Live is broadcast-only.
     await invoke("engine_ensure_running");
+    if (!liveDestReady) {
+      liveRoute.classList.add("attention");
+      await showLiveOutputList();
+      if (!picker.open) picker.showModal();
+      setTimeout(() => liveRoute.classList.remove("attention"), 1800);
+      return;
+    }
     try {
       await invoke("broadcast_enable");
       setAirVisual(true);
@@ -413,9 +663,11 @@ async function refreshStatus() {
   try {
     await invoke("engine_ensure_running");
     await syncSourcesFromEngine();
+    await restoreLastSession();
   } catch (e) {
     showError(String(e));
   }
   setInterval(refreshStatus, 100);
+  setInterval(tryRestorePendingSources, 2000);
   refreshStatus();
 })();

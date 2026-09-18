@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -54,6 +55,47 @@ struct SourceDto {
   mute: bool,
   monitor: bool,
   broadcast: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct SessionSourceDto {
+  kind: String,
+  name: String,
+  #[serde(default)]
+  device_id: Option<String>,
+  #[serde(default)]
+  process_name: Option<String>,
+  #[serde(default = "default_gain")]
+  gain: f32,
+  #[serde(default)]
+  mute: bool,
+  #[serde(default = "default_true")]
+  monitor: bool,
+  #[serde(default = "default_true")]
+  broadcast: bool,
+  #[serde(default)]
+  fx: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct SessionDto {
+  version: u32,
+  name: String,
+  #[serde(default)]
+  monitor_device_id: String,
+  #[serde(default)]
+  live_device_id: String,
+  #[serde(default)]
+  sources: Vec<SessionSourceDto>,
+}
+
+fn default_gain() -> f32 { 1.0 }
+fn default_true() -> bool { true }
+
+fn session_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+  let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+  fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir.join("last-session.json"))
 }
 
 fn open_pipe() -> Result<(std::fs::File, BufReader<std::fs::File>), String> {
@@ -322,6 +364,17 @@ fn engine_set_live_device(app: tauri::AppHandle, device_id: String) -> Result<()
 }
 
 #[tauri::command]
+fn engine_set_monitor_device(app: tauri::AppHandle, device_id: String) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("SET_MONITOR_DEVICE {device_id}"))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
 fn engine_list_processes(app: tauri::AppHandle) -> Result<Vec<ProcessDto>, String> {
   ensure_engine_process(&app)?;
   let lines = pipe_command_until_end("LIST_PROCESSES")?;
@@ -473,6 +526,31 @@ fn engine_set_broadcast(app: tauri::AppHandle, id: u32, enabled: bool) -> Result
   }
 }
 
+#[tauri::command]
+fn session_save(app: tauri::AppHandle, session: SessionDto) -> Result<(), String> {
+  if session.version != 1 {
+    return Err(format!("unsupported_session_version_{}", session.version));
+  }
+  let path = session_path(&app)?;
+  let data = serde_json::to_vec_pretty(&session).map_err(|e| e.to_string())?;
+  fs::write(path, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn session_load(app: tauri::AppHandle) -> Result<Option<SessionDto>, String> {
+  let path = session_path(&app)?;
+  let data = match fs::read(path) {
+    Ok(data) => data,
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    Err(e) => return Err(e.to_string()),
+  };
+  let session: SessionDto = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+  if session.version != 1 {
+    return Err(format!("unsupported_session_version_{}", session.version));
+  }
+  Ok(Some(session))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -492,6 +570,7 @@ pub fn run() {
       engine_list_processes,
       engine_list_sources,
       engine_set_live_device,
+      engine_set_monitor_device,
       engine_add_physical,
       engine_add_process,
       engine_add_tone,
@@ -499,7 +578,9 @@ pub fn run() {
       engine_set_gain,
       engine_set_mute,
       engine_set_monitor,
-      engine_set_broadcast
+      engine_set_broadcast,
+      session_save,
+      session_load
     ])
     .run(tauri::generate_context!())
     .expect("error while running MixBridge");
