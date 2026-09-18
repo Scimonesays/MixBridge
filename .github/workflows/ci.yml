@@ -20,6 +20,9 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir native/probes/build -C Release --output-on-failure
+      - name: Fetch pinned VST3 SDK
+        shell: pwsh
+        run: powershell -File scripts/fetch-vst3sdk.ps1
       - name: Configure engine
         shell: pwsh
         run: |
@@ -31,9 +34,6 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir native/audio-engine/build -C Release --output-on-failure
-      - name: Fetch pinned VST3 SDK
-        shell: pwsh
-        run: powershell -File scripts/fetch-vst3sdk.ps1
       - name: Configure VST3 host
         shell: pwsh
         run: cmake -S native/vst3-host -B native/vst3-host/build
