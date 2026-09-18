@@ -160,7 +160,6 @@ void Engine::free_slot(int index) {
     slots_[index].instrument_voices[v].gate.store(false, std::memory_order_relaxed);
     slots_[index].instrument_voices[v].note.store(-1, std::memory_order_relaxed);
     slots_[index].instrument_voices[v].velocity.store(0.0f, std::memory_order_relaxed);
-    slots_[index].instrument_state[v] = {};
   }
 }
 
