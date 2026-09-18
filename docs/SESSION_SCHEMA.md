@@ -22,7 +22,8 @@ The product default is a quiet auto-save/auto-restore flow: source/device choice
       "broadcast": true,
       "fx": [],
       "fx_bypass": false,
-      "fx_state_file": ""
+      "fx_state_file": "",
+      "instrument_preset": 0
     },
     {
       "kind": "process",
@@ -46,3 +47,8 @@ Current behavior:
 - gain, mute, monitor route, and broadcast route persist;
 - the current VST3 insert path, bypass state, and full processor/controller snapshot persist;
 - `fx` remains an array so later plugin-chain expansion does not require replacing the session shape.
+
+
+## Built-in instruments
+
+A source with `"kind": "instrument"` restores without external hardware. `instrument_preset` is `0` for **Neon Keys** and `1` for **Soft Pad**. Notes are ephemeral performance state and are never persisted.

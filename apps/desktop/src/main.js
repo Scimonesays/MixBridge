@@ -13,8 +13,12 @@ const sourceList = document.getElementById("source-list");
 const btnAdd = document.getElementById("btn-add");
 const picker = document.getElementById("picker");
 const pickerRoot = document.getElementById("picker-root");
+const instrumentDialog = document.getElementById("instrument-dialog");
+const instrumentKeys = document.getElementById("instrument-keys");
+const instrumentTitle = document.getElementById("instrument-title");
+const instrumentClose = document.getElementById("instrument-close");
 
-/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string, effectEditorOpen?:boolean, effectDirty?:boolean}>} */
+/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, instrumentPreset?:number, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string, effectEditorOpen?:boolean, effectDirty?:boolean}>} */
 const sources = new Map();
 
 let onAir = false;
@@ -40,6 +44,7 @@ const ICON = {
   power: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 2h2v10h-2V2zm-4.95 3.64 1.41 1.42A7 7 0 1 0 16.54 7l1.41-1.42A9 9 0 1 1 6.05 5.64z"/></svg>`,
   window: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5h16v14H4V5zm2 3v9h12V8H6zm1-2h2v1H7V6zm3 0h2v1h-2V6z"/></svg>`,
   back: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14.7 5.3 8 12l6.7 6.7 1.4-1.4L10.8 12l5.3-5.3-1.4-1.4z"/></svg>`,
+  keys: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v14H3V5zm2 2v10h2V7H5zm4 0v6h2V7H9zm4 0v10h2V7h-2zm4 0v6h2V7h-2z"/></svg>`,
 };
 
 function showError(msg) {
@@ -120,12 +125,13 @@ function sourceToSession(src) {
     fx: src.effectPath ? [src.effectPath] : [],
     fx_bypass: !!src.effectBypass,
     fx_state_file: src.effectStateFile || "",
+    instrument_preset: Number(src.instrumentPreset || 0),
   };
 }
 
 function buildSession() {
   const active = [...sources.values()]
-    .filter((src) => src.kind === "physical" || src.kind === "process")
+    .filter((src) => src.kind === "physical" || src.kind === "process" || src.kind === "instrument")
     .map(sourceToSession);
   const seen = new Set(active.map(sessionKey));
   for (const pending of pendingRestores) {
@@ -198,6 +204,26 @@ async function tryRestorePendingSources() {
 
     for (const cfg of pendingRestores) {
       try {
+        if (cfg.kind === "instrument") {
+          const res = await invoke("engine_add_instrument", { preset: Number(cfg.instrument_preset || 0) });
+          await applySourceSettings(res.id, cfg);
+          upsertSource({
+            id: res.id,
+            kind: "instrument",
+            name: cfg.name || (Number(cfg.instrument_preset || 0) === 1 ? "Soft Pad" : "Neon Keys"),
+            gain: Number(cfg.gain ?? 1),
+            mute: !!cfg.mute,
+            monitor: cfg.monitor !== false,
+            broadcast: cfg.broadcast !== false,
+            instrumentPreset: Number(cfg.instrument_preset || 0),
+            effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
+            effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
+            effectBypass: !!cfg.fx_bypass,
+            effectStateFile: cfg.fx_state_file || "",
+          });
+          continue;
+        }
+
         if (cfg.kind === "physical") {
           const device =
             devices.find((d) => cfg.device_id && d.id === cfg.device_id) ||
@@ -305,6 +331,7 @@ async function restoreLastSession() {
 
 function glyphForKind(kind) {
   if (kind === "process") return ICON.app;
+  if (kind === "instrument") return ICON.keys;
   return ICON.mic;
 }
 
@@ -322,6 +349,7 @@ function renderSources() {
       <div class="meter-wrap" aria-hidden="true"><div class="meter source-meter" data-meter="${src.id}"></div></div>
       <div class="source-actions">
         <button type="button" class="icon-btn tiny btn-mute ${src.mute ? "danger active" : ""}" title="Mute" aria-label="Mute" aria-pressed="${src.mute}">${ICON.mute}</button>
+        ${src.kind === "instrument" ? `<button type="button" class="icon-btn tiny btn-keys active" title="Play" aria-label="Open instrument">${ICON.keys}</button>` : ""}
         <button type="button" class="icon-btn tiny btn-fx ${src.effectPath ? "active" : ""} ${src.effectFaulted ? "danger" : ""}" title="${src.effectName || "Effects"}" aria-label="Effects" aria-pressed="${!!src.effectPath}">${ICON.fx}</button>
         <input type="range" min="0" max="200" value="${Math.round(src.gain * 100)}" title="Level" aria-label="Level" class="gain" />
         <button type="button" class="icon-btn tiny btn-mon ${src.monitor ? "active" : ""}" title="Monitor" aria-label="Monitor" aria-pressed="${src.monitor}">${ICON.headphones}</button>
@@ -329,6 +357,11 @@ function renderSources() {
         <button type="button" class="icon-btn tiny ghost btn-trash" title="Remove" aria-label="Remove">${ICON.trash}</button>
       </div>
     `;
+
+    const keysButton = card.querySelector(".btn-keys");
+    if (keysButton) {
+      keysButton.addEventListener("click", () => openInstrument(src));
+    }
 
     card.querySelector(".btn-fx").addEventListener("click", async () => {
       await showEffectList(src);
@@ -407,6 +440,7 @@ function upsertSource(dto) {
     gain: typeof dto.gain === "number" ? dto.gain : 1,
     deviceId: dto.deviceId ?? previous.deviceId,
     processName: dto.processName ?? previous.processName,
+    instrumentPreset: dto.instrument_preset ?? dto.instrumentPreset ?? previous.instrumentPreset ?? 0,
     effectName: dto.effect_name ?? dto.effectName ?? previous.effectName ?? "",
     effectPath: dto.effect_path ?? dto.effectPath ?? previous.effectPath ?? "",
     effectBypass: dto.effect_bypass ?? dto.effectBypass ?? previous.effectBypass ?? false,
@@ -446,10 +480,168 @@ function openPickerRoot() {
       ${ICON.app}
       <span>Application</span>
     </button>
+    <button type="button" class="choice" data-kind="instrument" title="Instrument" aria-label="Starter instrument">
+      ${ICON.keys}
+      <span>Instrument</span>
+    </button>
   `;
   pickerRoot.querySelector('[data-kind="physical"]').addEventListener("click", showPhysicalList);
   pickerRoot.querySelector('[data-kind="process"]').addEventListener("click", showProcessList);
+  pickerRoot.querySelector('[data-kind="instrument"]').addEventListener("click", showInstrumentPresets);
 }
+
+let currentInstrument = null;
+const pointerNotes = new Map();
+const keyboardNotes = new Map();
+const computerNoteMap = new Map([
+  ["a",60],["w",61],["s",62],["e",63],["d",64],["f",65],["t",66],
+  ["g",67],["y",68],["h",69],["u",70],["j",71],["k",72],
+]);
+
+async function instrumentNoteOn(note, velocity = 0.82) {
+  if (!currentInstrument) return;
+  await invoke("engine_instrument_note_on", {
+    id: currentInstrument.id, note, velocity
+  }).catch((e) => showError(String(e)));
+}
+
+async function instrumentNoteOff(note) {
+  if (!currentInstrument) return;
+  await invoke("engine_instrument_note_off", {
+    id: currentInstrument.id, note
+  }).catch((e) => showError(String(e)));
+}
+
+async function instrumentAllNotesOff() {
+  if (!currentInstrument) return;
+  pointerNotes.clear();
+  keyboardNotes.clear();
+  await invoke("engine_instrument_notes_off", { id: currentInstrument.id }).catch(() => {});
+  instrumentKeys.querySelectorAll(".piano-key.active").forEach((el) => el.classList.remove("active"));
+}
+
+function makePianoKey(note, label, black = false, left = null) {
+  const key = document.createElement("button");
+  key.type = "button";
+  key.className = `piano-key ${black ? "black" : "white"}`;
+  key.dataset.note = String(note);
+  key.setAttribute("aria-label", label);
+  key.title = label;
+  if (left !== null) key.style.left = left;
+  key.innerHTML = `<span>${label}</span>`;
+
+  const down = async (ev) => {
+    ev.preventDefault();
+    key.setPointerCapture?.(ev.pointerId);
+    pointerNotes.set(ev.pointerId, note);
+    key.classList.add("active");
+    await instrumentNoteOn(note);
+  };
+  const up = async (ev) => {
+    const held = pointerNotes.get(ev.pointerId);
+    if (held === undefined) return;
+    pointerNotes.delete(ev.pointerId);
+    key.classList.remove("active");
+    await instrumentNoteOff(held);
+  };
+  key.addEventListener("pointerdown", down);
+  key.addEventListener("pointerup", up);
+  key.addEventListener("pointercancel", up);
+  key.addEventListener("lostpointercapture", up);
+  return key;
+}
+
+function renderInstrumentKeyboard() {
+  instrumentKeys.innerHTML = "";
+  const whites = [[60,"C"],[62,"D"],[64,"E"],[65,"F"],[67,"G"],[69,"A"],[71,"B"],[72,"C"]];
+  const blacks = [[61,"C♯",9.3],[63,"D♯",21.8],[66,"F♯",46.8],[68,"G♯",59.3],[70,"A♯",71.8]];
+  for (const [note,label] of whites) instrumentKeys.appendChild(makePianoKey(note,label));
+  for (const [note,label,left] of blacks) instrumentKeys.appendChild(makePianoKey(note,label,true,`${left}%`));
+}
+
+async function openInstrument(src) {
+  currentInstrument = src;
+  instrumentTitle.textContent = src.name;
+  renderInstrumentKeyboard();
+  if (!instrumentDialog.open) instrumentDialog.showModal();
+}
+
+async function showInstrumentPresets() {
+  pickerRoot.className = "pick-list";
+  pickerRoot.innerHTML = `<button type="button" class="icon-btn tiny pick-back" title="Back" aria-label="Back">${ICON.back}</button>`;
+  pickerRoot.querySelector(".pick-back").addEventListener("click", openPickerRoot);
+  const presets = [
+    { preset: 0, name: "Neon Keys" },
+    { preset: 1, name: "Soft Pad" },
+  ];
+  for (const item of presets) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "pick-row";
+    row.title = item.name;
+    row.setAttribute("aria-label", item.name);
+    row.innerHTML = `${ICON.keys}<span>${item.name}</span>`;
+    row.addEventListener("click", async () => {
+      try {
+        const res = await invoke("engine_add_instrument", { preset: item.preset });
+        const src = {
+          id: res.id,
+          kind: "instrument",
+          name: item.name,
+          mute: false,
+          monitor: true,
+          broadcast: true,
+          gain: 1,
+          instrumentPreset: item.preset,
+        };
+        upsertSource(src);
+        renderSources();
+        scheduleSessionSave();
+        closePicker();
+        showError("");
+        await openInstrument(sources.get(res.id));
+      } catch (e) {
+        showError(String(e));
+      }
+    });
+    pickerRoot.appendChild(row);
+  }
+}
+
+instrumentClose.addEventListener("click", async () => {
+  await instrumentAllNotesOff();
+  instrumentDialog.close();
+  currentInstrument = null;
+});
+instrumentDialog.addEventListener("close", async () => {
+  await instrumentAllNotesOff();
+  currentInstrument = null;
+});
+instrumentDialog.addEventListener("click", async (ev) => {
+  if (ev.target === instrumentDialog) {
+    await instrumentAllNotesOff();
+    instrumentDialog.close();
+  }
+});
+window.addEventListener("blur", instrumentAllNotesOff);
+window.addEventListener("keydown", async (ev) => {
+  if (!instrumentDialog.open || ev.repeat) return;
+  const note = computerNoteMap.get(ev.key.toLowerCase());
+  if (note === undefined || keyboardNotes.has(ev.key.toLowerCase())) return;
+  ev.preventDefault();
+  keyboardNotes.set(ev.key.toLowerCase(), note);
+  instrumentKeys.querySelector(`[data-note="${note}"]`)?.classList.add("active");
+  await instrumentNoteOn(note);
+});
+window.addEventListener("keyup", async (ev) => {
+  const key = ev.key.toLowerCase();
+  const note = keyboardNotes.get(key);
+  if (note === undefined) return;
+  ev.preventDefault();
+  keyboardNotes.delete(key);
+  instrumentKeys.querySelector(`[data-note="${note}"]`)?.classList.remove("active");
+  await instrumentNoteOff(note);
+});
 
 async function showPhysicalList() {
   pickerRoot.className = "pick-list";

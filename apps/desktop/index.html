@@ -68,6 +68,16 @@
         </div>
       </dialog>
 
+      <dialog id="instrument-dialog" class="instrument-dialog" aria-label="Starter instrument">
+        <div class="instrument-panel">
+          <div class="instrument-head">
+            <span id="instrument-title"></span>
+            <button id="instrument-close" class="icon-btn tiny ghost" type="button" title="Close" aria-label="Close">×</button>
+          </div>
+          <div id="instrument-keys" class="piano" aria-label="On-screen keyboard"></div>
+        </div>
+      </dialog>
+
       <p id="status" class="status" role="status" aria-live="assertive"></p>
     </div>
     <script type="module" src="/src/main.js"></script>

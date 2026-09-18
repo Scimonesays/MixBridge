@@ -63,6 +63,7 @@ struct SourceDto {
   effect_faulted: bool,
   effect_editor_open: bool,
   effect_dirty: bool,
+  instrument_preset: u32,
 }
 
 #[derive(Serialize, Clone)]
@@ -98,6 +99,8 @@ struct SessionSourceDto {
   fx_bypass: bool,
   #[serde(default)]
   fx_state_file: String,
+  #[serde(default)]
+  instrument_preset: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -545,6 +548,9 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
     let effect_faulted = parse_field(&parts, "FX_FAULT") == Some("1");
     let effect_editor_open = parse_field(&parts, "FX_EDITOR") == Some("1");
     let effect_dirty = parse_field(&parts, "FX_DIRTY") == Some("1");
+    let instrument_preset = parse_field(&parts, "PRESET")
+      .and_then(|s| s.parse().ok())
+      .unwrap_or(0);
     let effect_name = if let Some(i) = parts.iter().position(|t| *t == "FX_NAME") {
       let end = parts.iter().enumerate().skip(i + 1)
         .find(|(_, t)| **t == "FX_PATH")
@@ -574,6 +580,7 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
         effect_faulted,
         effect_editor_open,
         effect_dirty,
+        instrument_preset,
       });
     }
   }
@@ -596,6 +603,42 @@ fn engine_add_process(app: tauri::AppHandle, pid: u32, name: String) -> Result<I
 fn engine_add_tone(app: tauri::AppHandle, hz: f32) -> Result<IdDto, String> {
   ensure_running(&app)?;
   parse_id(&pipe_command(&format!("ADD_TONE {hz}"))?)
+}
+
+#[tauri::command]
+fn engine_add_instrument(app: tauri::AppHandle, preset: u32) -> Result<IdDto, String> {
+  ensure_running(&app)?;
+  parse_id(&pipe_command(&format!("ADD_INSTRUMENT {preset}"))?)
+}
+
+#[tauri::command]
+fn engine_instrument_note_on(
+  app: tauri::AppHandle,
+  id: u32,
+  note: u32,
+  velocity: f32,
+) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("INSTRUMENT_NOTE_ON {id} {note} {velocity}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
+fn engine_instrument_note_off(
+  app: tauri::AppHandle,
+  id: u32,
+  note: u32,
+) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("INSTRUMENT_NOTE_OFF {id} {note}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
+fn engine_instrument_notes_off(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("INSTRUMENT_NOTES_OFF {id}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
 }
 
 #[tauri::command]
@@ -783,6 +826,10 @@ pub fn run() {
       engine_add_physical,
       engine_add_process,
       engine_add_tone,
+      engine_add_instrument,
+      engine_instrument_note_on,
+      engine_instrument_note_off,
+      engine_instrument_notes_off,
       engine_remove_source,
       vst3_list,
       engine_set_vst3,
