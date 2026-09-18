@@ -38,8 +38,8 @@ Forbidden as source imports into MIT application/engine code without a separate 
 | truce-rack | MIT OR Apache-2.0 | `233f56c` | Ideas only for now | — | if adapted |
 | Jamulus | AGPL-3.0-or-later (+ older GPL) | `cc40a8a` | **No code** | — | reference only |
 | SonoBus | GPL-3.0 | `35f1062` | **No code** | — | reference only |
-| Helm | GPL-3.0 | upstream | **No code** | — | synth UX/architecture reference only |
-| Vital | GPL-3.0 | upstream | **No code** | — | synth UX/architecture reference only |
+| Helm | GPL-3.0 | `abdedd5` | **No code** | — | synth UX/architecture reference only |
+| Vital | GPL-3.0 | `636ca0e` | **No code** | — | synth UX/architecture reference only |
 | VB-CABLE | Proprietary | n/a | External optional backend only | runtime detection | do not bundle until reviewed |
 | ASIO SDK | Proprietary / Steinberg terms | n/a | Feature-gated, isolated, after review | future backend | quarantine SDK files |
 

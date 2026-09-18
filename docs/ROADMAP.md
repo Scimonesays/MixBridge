@@ -6,7 +6,7 @@
 - **Audio probes:** capture, render, system loopback, process loopback and deterministic DSP — done.
 - **Realtime engine:** C++20/WASAPI graph, monitor + broadcast buses, meters, IPC, recovery states and soak harness — done.
 - **Product shell:** icon-first Sources → Mix → Outputs, real source/output pickers, Standby/On Air state and automatic session restore — done.
-- **VST3:** discovery, load/process, per-source insert, bypass, dry fallback, component/controller state snapshots and session restore — done.
+- **VST3:** discovery, load/process, per-source insert, bypass, dry fallback, live native editor window, realtime parameter bridge, component/controller state snapshots and session restore — done.
 - **Live output:** user-selected real Windows render/virtual-cable endpoint — done.
 - **Packaging:** portable sidecar + NSIS release script + CI installer gate — implemented.
 - **Starter instruments:** first-party Neon Keys + Soft Pad, polyphonic keyboard UI, normal FX/monitor/live routing and session restore — done.
@@ -14,7 +14,6 @@
 
 ## Post-V1 enhancements
 
-- Native VST3 editor-window hosting.
 - Multi-plugin chains instead of the V1 single insert.
 - MixBridge Send VST3 for DAW-to-MixBridge routing.
 - Expanded MIDI controller support and additional first-party instruments.

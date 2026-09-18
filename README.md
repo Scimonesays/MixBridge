@@ -17,7 +17,7 @@ Implemented today:
 - physical WASAPI capture and per-application/process loopback
 - realtime multi-source mixing, gain, mute, routing, meters and limiter
 - selectable monitor and Live destinations with honest **Standby / On Air** state
-- real VST3 discovery, loading and realtime processing
+- real VST3 discovery, loading and realtime processing, including the plug-in's native editor window
 - per-source VST3 insert, bypass, dry fallback on fault, and saved component/controller state
 - automatic last-session restoration of devices, applications, levels, routes and VST3 snapshots
 - built-in **Neon Keys** and **Soft Pad** instruments from the + source picker, with on-screen/computer keyboard play

@@ -42,6 +42,7 @@ The `finish/mixbridge-release` GitHub Actions run is authoritative for merge rea
 - real monitor + Live output selection
 - multi-source add/remove/gain/mute/route
 - per-source VST3 insert/bypass/fault-to-dry
+- native VST3 editor window + realtime parameter bridge + dirty-state snapshot autosave
 - VST3 component + controller state snapshots
 - automatic source/device/process/VST restore
 - portable bundled native engine sidecar
