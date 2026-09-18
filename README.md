@@ -20,6 +20,7 @@ Implemented today:
 - real VST3 discovery, loading and realtime processing
 - per-source VST3 insert, bypass, dry fallback on fault, and saved component/controller state
 - automatic last-session restoration of devices, applications, levels, routes and VST3 snapshots
+- built-in **Neon Keys** and **Soft Pad** instruments from the + source picker, with on-screen/computer keyboard play
 - portable Tauri/NSIS packaging with the native audio engine bundled
 
 ### Live output today

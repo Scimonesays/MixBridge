@@ -45,6 +45,7 @@ The `finish/mixbridge-release` GitHub Actions run is authoritative for merge rea
 - VST3 component + controller state snapshots
 - automatic source/device/process/VST restore
 - portable bundled native engine sidecar
+- first-party starter instrument source with deterministic non-silence engine test and session restore
 
 ## Final hardware smoke test before public release
 

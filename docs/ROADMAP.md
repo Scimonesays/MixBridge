@@ -9,6 +9,7 @@
 - **VST3:** discovery, load/process, per-source insert, bypass, dry fallback, component/controller state snapshots and session restore — done.
 - **Live output:** user-selected real Windows render/virtual-cable endpoint — done.
 - **Packaging:** portable sidecar + NSIS release script + CI installer gate — implemented.
+- **Starter instruments:** first-party Neon Keys + Soft Pad, polyphonic keyboard UI, normal FX/monitor/live routing and session restore — done.
 - **Release UI:** final broadcast-console visual pass + README product screenshot — done.
 
 ## Post-V1 enhancements
@@ -16,7 +17,7 @@
 - Native VST3 editor-window hosting.
 - Multi-plugin chains instead of the V1 single insert.
 - MixBridge Send VST3 for DAW-to-MixBridge routing.
-- Starter instruments/MIDI workflow.
+- Expanded MIDI controller support and additional first-party instruments.
 - Network/jam features.
 
 ## Separate signed-driver track
