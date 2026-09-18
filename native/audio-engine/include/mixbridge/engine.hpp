@@ -73,6 +73,11 @@ public:
   bool set_pan(uint32_t id, float pan);
   bool set_master_gain(float gain);
 
+  // FX hook (control thread). Pass nullptr fn to clear.
+  bool set_source_fx_hook(uint32_t id, SourceSlot::FxProcessFn fn, void* ctx, const std::string& name);
+  bool set_source_fx_bypass(uint32_t id, bool bypass);
+  std::string source_fx_name(uint32_t id) const;
+
   MeterSnapshot source_meter(uint32_t id);
   MeterSnapshot master_meter();
   MeterSnapshot broadcast_meter();

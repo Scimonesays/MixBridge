@@ -83,6 +83,7 @@ struct SourceInfo {
   uint32_t id = 0;
   SourceKind kind = SourceKind::ToneFixture;
   std::string name;
+  std::string device_id;  // utf-8 WASAPI id when physical
   float gain = 1.0f;
   bool mute = false;
   bool monitor = true;

@@ -7,7 +7,10 @@ namespace {
 
 std::string stem_name(const std::filesystem::path& p) {
   auto s = p.stem().string();
-  if (s.size() > 5 && s.ends_with(".vst3")) s.resize(s.size() - 5);
+  const std::string suffix = ".vst3";
+  if (s.size() > suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    s.resize(s.size() - suffix.size());
+  }
   return s;
 }
 

@@ -7,6 +7,17 @@
 #include <cstring>
 
 namespace mixbridge {
+namespace {
+
+std::string wide_to_utf8(const std::wstring& ws) {
+  if (ws.empty()) return {};
+  int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
+  std::string out(static_cast<size_t>(n > 0 ? n - 1 : 0), '\0');
+  if (n > 1) WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, out.data(), n, nullptr, nullptr);
+  return out;
+}
+
+}  // namespace
 
 Engine::Engine() = default;
 
@@ -78,6 +89,7 @@ std::vector<SourceInfo> Engine::list_sources() const {
     info.id = slots_[i].id.load(std::memory_order_relaxed);
     info.kind = static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed));
     info.name = slots_[i].name;
+    info.device_id = wide_to_utf8(slots_[i].device_id);
     info.gain = slots_[i].gain.load(std::memory_order_relaxed);
     info.mute = slots_[i].mute.load(std::memory_order_relaxed);
     info.monitor = slots_[i].monitor.load(std::memory_order_relaxed);
@@ -136,6 +148,10 @@ void Engine::free_slot(int index) {
   slots_[index].meter.reset();
   slots_[index].name.clear();
   slots_[index].device_id.clear();
+  slots_[index].fx_process.store(nullptr, std::memory_order_release);
+  slots_[index].fx_ctx.store(nullptr, std::memory_order_release);
+  slots_[index].fx_name.clear();
+  slots_[index].fx_bypass.store(true, std::memory_order_release);
 }
 
 SourceSlot* Engine::slot_by_id(uint32_t id) {
@@ -312,6 +328,37 @@ bool Engine::set_pan(uint32_t id, float pan) {
 bool Engine::set_master_gain(float gain) {
   master_gain_.store(std::clamp(gain, 0.0f, 4.0f));
   return true;
+}
+
+bool Engine::set_source_fx_hook(uint32_t id, SourceSlot::FxProcessFn fn, void* ctx,
+                                const std::string& name) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  auto* s = slot_by_id(id);
+  if (!s) return false;
+  s->fx_process.store(fn, std::memory_order_release);
+  s->fx_ctx.store(ctx, std::memory_order_release);
+  s->fx_name = name;
+  // Hook present → process unless explicitly bypassed. Clearing hook restores bypass.
+  s->fx_bypass.store(!fn, std::memory_order_release);
+  return true;
+}
+
+bool Engine::set_source_fx_bypass(uint32_t id, bool bypass) {
+  if (auto* s = slot_by_id(id)) {
+    s->fx_bypass.store(bypass, std::memory_order_release);
+    return true;
+  }
+  return false;
+}
+
+std::string Engine::source_fx_name(uint32_t id) const {
+  for (uint32_t i = 0; i < kMaxSources; ++i) {
+    if (slots_[i].active.load(std::memory_order_relaxed) &&
+        slots_[i].id.load(std::memory_order_relaxed) == id) {
+      return slots_[i].fx_name;
+    }
+  }
+  return {};
 }
 
 MeterSnapshot Engine::source_meter(uint32_t id) {

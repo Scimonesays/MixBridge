@@ -1,11 +1,20 @@
 #include "mixbridge/engine.hpp"
 
+#if defined(MIXBRIDGE_WITH_VST3)
+#include "mixbridge/vst3_processor.hpp"
+#endif
+
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include <atomic>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,8 +66,104 @@ static const char* source_kind_name(mixbridge::SourceKind k) {
   return "unknown";
 }
 
+#if defined(MIXBRIDGE_WITH_VST3)
+struct FxChain {
+  std::vector<std::unique_ptr<mixbridge::vst3::Processor>> plugs;
+  std::atomic<bool> faulted{false};
+};
+
+using FxMap = std::unordered_map<uint32_t, std::unique_ptr<FxChain>>;
+
+static int process_one_seh(mixbridge::vst3::Processor* p, float* interleaved, int32_t frames) {
+  if (!p) return 0;
+  __try {
+    return p->process(interleaved, frames, nullptr) ? 1 : 0;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return -1;
+  }
+}
+
+static void fx_chain_thunk(void* ctx, float* interleaved, uint32_t frames) {
+  auto* chain = static_cast<FxChain*>(ctx);
+  if (!chain || chain->faulted.load(std::memory_order_relaxed)) return;
+  for (auto& plug : chain->plugs) {
+    const int rc = process_one_seh(plug.get(), interleaved, static_cast<int32_t>(frames));
+    if (rc < 0) {
+      chain->faulted.store(true, std::memory_order_release);
+      return;
+    }
+  }
+}
+
+static std::string chain_display_name(const FxChain& chain) {
+  if (chain.plugs.empty()) return {};
+  std::string n = chain.plugs.front()->name();
+  for (size_t i = 1; i < chain.plugs.size(); ++i) {
+    n += " > ";
+    n += chain.plugs[i]->name();
+  }
+  return n;
+}
+
+static void clear_fx(mixbridge::Engine& engine, FxMap& fx, uint32_t id) {
+  engine.set_source_fx_hook(id, nullptr, nullptr, "");
+  fx.erase(id);
+}
+
+static void rebind_fx(mixbridge::Engine& engine, FxMap& fx, uint32_t id) {
+  auto it = fx.find(id);
+  if (it == fx.end() || !it->second || it->second->plugs.empty()) {
+    clear_fx(engine, fx, id);
+    return;
+  }
+  it->second->faulted.store(false, std::memory_order_release);
+  engine.set_source_fx_hook(id, &fx_chain_thunk, it->second.get(), chain_display_name(*it->second));
+  engine.set_source_fx_bypass(id, false);
+}
+
+static std::filesystem::path mixbridge_config_dir() {
+  const char* la = std::getenv("LOCALAPPDATA");
+  std::filesystem::path p = la ? std::filesystem::path(la) : std::filesystem::path(".");
+  return p / "MixBridge";
+}
+
+static void load_quarantine(std::unordered_set<std::string>& quarantine) {
+  const auto path = mixbridge_config_dir() / "vst3-quarantine.txt";
+  std::ifstream in(path);
+  if (!in) return;
+  std::string line;
+  while (std::getline(in, line)) {
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+    if (!line.empty()) quarantine.insert(line);
+  }
+}
+
+static void save_quarantine(const std::unordered_set<std::string>& quarantine) {
+  const auto dir = mixbridge_config_dir();
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  std::ofstream out(dir / "vst3-quarantine.txt", std::ios::trunc);
+  if (!out) return;
+  for (const auto& p : quarantine) out << p << "\n";
+}
+
+static bool write_fx_state_file(const std::vector<uint8_t>& blob, std::string& out_path, std::string& error) {
+  const auto dir = mixbridge_config_dir() / "fx-state";
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  const auto path = dir / ("state-" + std::to_string(GetTickCount64()) + ".bin");
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    error = "state_write_failed";
+    return false;
+  }
+  if (!blob.empty()) out.write(reinterpret_cast<const char*>(blob.data()), static_cast<std::streamsize>(blob.size()));
+  out_path = path.string();
+  return true;
+}
+#endif
+
 static void list_processes(HANDLE pipe) {
-  // Visible-window process list for application capture picker (no PIDs in UI).
   std::unordered_set<DWORD> pids;
   EnumWindows(
     [](HWND hwnd, LPARAM lp) -> BOOL {
@@ -88,7 +193,6 @@ static void list_processes(HANDLE pipe) {
       if (pe.th32ProcessID == GetCurrentProcessId()) continue;
       std::string name = wide_to_utf8(pe.szExeFile);
       if (name.empty()) continue;
-      // Skip obvious system shells
       if (_stricmp(name.c_str(), "explorer.exe") == 0) continue;
       if (_stricmp(name.c_str(), "ApplicationFrameHost.exe") == 0) continue;
       if (_stricmp(name.c_str(), "SearchHost.exe") == 0) continue;
@@ -106,7 +210,12 @@ static void list_processes(HANDLE pipe) {
   write_line(pipe, "OK END");
 }
 
-static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
+static void handle_client(mixbridge::Engine& engine, HANDLE pipe
+#if defined(MIXBRIDGE_WITH_VST3)
+                          ,
+                          FxMap& fx_map, std::unordered_set<std::string>& quarantine
+#endif
+) {
   std::string err;
   write_line(pipe, "OK HELLO mixbridge-ipc/1");
   while (true) {
@@ -148,14 +257,214 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       auto sources = engine.list_sources();
       write_line(pipe, "OK COUNT " + std::to_string(sources.size()));
       for (const auto& s : sources) {
-        char buf[512];
+        std::string fx = engine.source_fx_name(s.id);
+        if (fx.empty()) fx = "-";
+        char buf[768];
         std::snprintf(buf, sizeof(buf),
-                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d", s.id,
-                      source_kind_name(s.kind), s.name.c_str(), s.gain, s.mute ? 1 : 0,
-                      s.monitor ? 1 : 0, s.broadcast ? 1 : 0);
+                      "SOURCE ID %u KIND %s NAME %s DEVICE %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d FX %s",
+                      s.id, source_kind_name(s.kind), s.name.c_str(),
+                      s.device_id.empty() ? "-" : s.device_id.c_str(), s.gain, s.mute ? 1 : 0,
+                      s.monitor ? 1 : 0, s.broadcast ? 1 : 0, fx.c_str());
         write_line(pipe, buf);
       }
       write_line(pipe, "OK END");
+#if defined(MIXBRIDGE_WITH_VST3)
+    } else if (cmd == "LIST_VST3") {
+      auto plugins = mixbridge::vst3::list_installed();
+      write_line(pipe, "OK COUNT " + std::to_string(plugins.size()));
+      for (const auto& p : plugins) {
+        const int q = quarantine.count(p.second) ? 1 : 0;
+        write_line(pipe, "PLUGIN NAME " + p.first + " QUARANTINE " + std::to_string(q) + " PATH " +
+                           p.second);
+      }
+      write_line(pipe, "OK END");
+    } else if (cmd == "CLEAR_QUARANTINE") {
+      quarantine.clear();
+      save_quarantine(quarantine);
+      write_line(pipe, "OK");
+    } else if (cmd == "LIST_FX") {
+      uint32_t id = 0;
+      iss >> id;
+      auto it = fx_map.find(id);
+      if (it == fx_map.end() || !it->second) {
+        write_line(pipe, "OK COUNT 0");
+        write_line(pipe, "OK END");
+      } else {
+        write_line(pipe, "OK COUNT " + std::to_string(it->second->plugs.size()));
+        for (size_t i = 0; i < it->second->plugs.size(); ++i) {
+          write_line(pipe, "FX INDEX " + std::to_string(i) + " NAME " + it->second->plugs[i]->name() +
+                             " PATH " + it->second->plugs[i]->path() + " BYPASS " +
+                             (it->second->plugs[i]->bypassed() ? "1" : "0"));
+        }
+        write_line(pipe, "OK END");
+      }
+    } else if (cmd == "ADD_FX") {
+      uint32_t id = 0;
+      iss >> id;
+      std::string path;
+      std::getline(iss >> std::ws, path);
+      while (!path.empty() && (path.back() == ' ' || path.back() == '\t')) path.pop_back();
+      if (quarantine.count(path)) {
+        write_line(pipe, "ERR quarantined");
+      } else {
+        auto proc = std::make_unique<mixbridge::vst3::Processor>();
+        if (!proc->load(path, err)) {
+          quarantine.insert(path);
+          save_quarantine(quarantine);
+          write_line(pipe, "ERR " + err);
+        } else if (!proc->prepare(48000.0, 512, err)) {
+          quarantine.insert(path);
+          save_quarantine(quarantine);
+          write_line(pipe, "ERR " + err);
+        } else {
+          proc->set_bypass(false);
+          auto& chain = fx_map[id];
+          if (!chain) chain = std::make_unique<FxChain>();
+          chain->plugs.push_back(std::move(proc));
+          rebind_fx(engine, fx_map, id);
+          write_line(pipe, "OK FX " + chain_display_name(*fx_map[id]) + " INDEX " +
+                             std::to_string(fx_map[id]->plugs.size() - 1));
+        }
+      }
+    } else if (cmd == "REMOVE_FX") {
+      uint32_t id = 0;
+      iss >> id;
+      std::string rest;
+      std::getline(iss >> std::ws, rest);
+      while (!rest.empty() && (rest.back() == ' ' || rest.back() == '\t')) rest.pop_back();
+      if (!rest.empty()) {
+        int index = 0;
+        try {
+          index = std::stoi(rest);
+        } catch (...) {
+          write_line(pipe, "ERR bad_index");
+          continue;
+        }
+        auto it = fx_map.find(id);
+        if (it == fx_map.end() || !it->second || index < 0 ||
+            static_cast<size_t>(index) >= it->second->plugs.size()) {
+          write_line(pipe, "ERR no_fx");
+        } else {
+          it->second->plugs.erase(it->second->plugs.begin() + index);
+          rebind_fx(engine, fx_map, id);
+          write_line(pipe, "OK");
+        }
+      } else {
+        clear_fx(engine, fx_map, id);
+        write_line(pipe, "OK");
+      }
+    } else if (cmd == "MOVE_FX") {
+      uint32_t id = 0;
+      int from = 0;
+      int to = 0;
+      iss >> id >> from >> to;
+      auto it = fx_map.find(id);
+      if (it == fx_map.end() || !it->second || from < 0 || to < 0 ||
+          static_cast<size_t>(from) >= it->second->plugs.size() ||
+          static_cast<size_t>(to) >= it->second->plugs.size()) {
+        write_line(pipe, "ERR no_fx");
+      } else {
+        auto plug = std::move(it->second->plugs[static_cast<size_t>(from)]);
+        it->second->plugs.erase(it->second->plugs.begin() + from);
+        it->second->plugs.insert(it->second->plugs.begin() + to, std::move(plug));
+        rebind_fx(engine, fx_map, id);
+        write_line(pipe, "OK");
+      }
+    } else if (cmd == "SET_FX_BYPASS") {
+      uint32_t id = 0;
+      int b = 0;
+      int index = -1;
+      iss >> id >> b;
+      if (iss >> index) {
+        auto it = fx_map.find(id);
+        if (it == fx_map.end() || !it->second || index < 0 ||
+            static_cast<size_t>(index) >= it->second->plugs.size()) {
+          write_line(pipe, "ERR no_fx");
+        } else {
+          it->second->plugs[static_cast<size_t>(index)]->set_bypass(b != 0);
+          write_line(pipe, "OK");
+        }
+      } else if (auto it = fx_map.find(id); it != fx_map.end() && it->second) {
+        for (auto& p : it->second->plugs) p->set_bypass(b != 0);
+        engine.set_source_fx_bypass(id, b != 0);
+        write_line(pipe, "OK");
+      } else {
+        write_line(pipe, "ERR no_fx");
+      }
+    } else if (cmd == "OPEN_FX_EDITOR") {
+      uint32_t id = 0;
+      int index = 0;
+      iss >> id;
+      if (!(iss >> index)) index = 0;
+      auto it = fx_map.find(id);
+      if (it == fx_map.end() || !it->second || index < 0 ||
+          static_cast<size_t>(index) >= it->second->plugs.size()) {
+        write_line(pipe, "ERR no_fx");
+      } else if (it->second->plugs[static_cast<size_t>(index)]->open_editor(err)) {
+        write_line(pipe, "OK");
+      } else {
+        write_line(pipe, "ERR " + err);
+      }
+    } else if (cmd == "CLOSE_FX_EDITOR") {
+      uint32_t id = 0;
+      int index = 0;
+      iss >> id;
+      if (!(iss >> index)) index = 0;
+      auto it = fx_map.find(id);
+      if (it == fx_map.end() || !it->second || index < 0 ||
+          static_cast<size_t>(index) >= it->second->plugs.size()) {
+        write_line(pipe, "ERR no_fx");
+      } else {
+        it->second->plugs[static_cast<size_t>(index)]->close_editor();
+        write_line(pipe, "OK");
+      }
+    } else if (cmd == "GET_FX_STATE") {
+      uint32_t id = 0;
+      int index = 0;
+      iss >> id;
+      if (!(iss >> index)) index = 0;
+      auto it = fx_map.find(id);
+      if (it == fx_map.end() || !it->second || index < 0 ||
+          static_cast<size_t>(index) >= it->second->plugs.size()) {
+        write_line(pipe, "ERR no_fx");
+      } else {
+        std::vector<uint8_t> blob;
+        std::string path;
+        if (!it->second->plugs[static_cast<size_t>(index)]->get_state(blob, err)) {
+          write_line(pipe, "ERR " + err);
+        } else if (!write_fx_state_file(blob, path, err)) {
+          write_line(pipe, "ERR " + err);
+        } else {
+          write_line(pipe, "OK BYTES " + std::to_string(blob.size()) + " PATH " + path);
+        }
+      }
+    } else if (cmd == "SET_FX_STATE") {
+      uint32_t id = 0;
+      int index = 0;
+      iss >> id >> index;
+      std::string path;
+      std::getline(iss >> std::ws, path);
+      while (!path.empty() && (path.back() == ' ' || path.back() == '\t')) path.pop_back();
+      auto it = fx_map.find(id);
+      if (it == fx_map.end() || !it->second || index < 0 ||
+          static_cast<size_t>(index) >= it->second->plugs.size()) {
+        write_line(pipe, "ERR no_fx");
+      } else {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+          write_line(pipe, "ERR state_read_failed");
+        } else {
+          std::vector<uint8_t> blob((std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
+          if (!it->second->plugs[static_cast<size_t>(index)]->set_state(
+                blob.data(), blob.size(), err)) {
+            write_line(pipe, "ERR " + err);
+          } else {
+            write_line(pipe, "OK");
+          }
+        }
+      }
+#endif
     } else if (cmd == "START") {
       if (engine.start(err)) write_line(pipe, "OK STARTED");
       else write_line(pipe, "ERR " + err);
@@ -187,7 +496,6 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
     } else if (cmd == "ADD_PHYSICAL") {
       std::string id_utf8;
       std::getline(iss >> std::ws, id_utf8);
-      // Trim trailing spaces
       while (!id_utf8.empty() && (id_utf8.back() == ' ' || id_utf8.back() == '\t')) id_utf8.pop_back();
       mixbridge::AddPhysicalRequest req;
       req.device_id = utf8_to_wide(id_utf8);
@@ -203,9 +511,27 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       const auto id = engine.add_process_loopback(req, err);
       if (id) write_line(pipe, "OK ID " + std::to_string(id));
       else write_line(pipe, "ERR " + err);
+    } else if (cmd == "REGISTER_VST3_SEND") {
+      // Scaffold: VST3 Send plugin registers intent + SHM mapping name.
+      // Audio ingestion (ADD_SEND_BUFFER / engine ring push) is not wired yet.
+      std::string name;
+      std::string transport;
+      std::string path;
+      iss >> name >> transport;
+      std::getline(iss >> std::ws, path);
+      while (!path.empty() && (path.back() == ' ' || path.back() == '\t')) path.pop_back();
+      if (name.empty() || transport != "SHM" || path.empty()) {
+        write_line(pipe, "ERR bad_register_vst3_send");
+      } else {
+        write_line(pipe, "OK RESERVED NAME " + name + " TRANSPORT " + transport + " PATH " + path +
+                           " NOTE send_sink_not_wired");
+      }
     } else if (cmd == "REMOVE") {
       uint32_t id = 0;
       iss >> id;
+#if defined(MIXBRIDGE_WITH_VST3)
+      clear_fx(engine, fx_map, id);
+#endif
       if (engine.remove_source(id, err)) write_line(pipe, "OK REMOVED");
       else write_line(pipe, "ERR " + err);
     } else if (cmd == "SET_GAIN") {
@@ -247,6 +573,9 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       write_line(pipe, buf);
     } else if (cmd == "SHUTDOWN") {
       write_line(pipe, "OK BYE");
+#if defined(MIXBRIDGE_WITH_VST3)
+      fx_map.clear();
+#endif
       engine.stop();
       engine.shutdown();
       FlushFileBuffers(pipe);
@@ -270,7 +599,12 @@ int main() {
     return 1;
   }
 
-  // Developer-only live sink flag — never a production destination.
+#if defined(MIXBRIDGE_WITH_VST3)
+  FxMap fx_map;
+  std::unordered_set<std::string> quarantine;
+  load_quarantine(quarantine);
+#endif
+
   wchar_t env[8]{};
   if (GetEnvironmentVariableW(L"MIXBRIDGE_DEV_LIVE_SINK", env, 8) > 0 && env[0] == L'1') {
     engine.set_live_destination_ready(true);
@@ -295,6 +629,10 @@ int main() {
       CloseHandle(pipe);
       continue;
     }
+#if defined(MIXBRIDGE_WITH_VST3)
+    handle_client(engine, pipe, fx_map, quarantine);
+#else
     handle_client(engine, pipe);
+#endif
   }
 }

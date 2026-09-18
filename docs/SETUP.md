@@ -15,7 +15,8 @@ Generated from Phase 0 environment detection on the development machine.
 | Node.js | 24.x LTS line | Tauri frontend |
 | npm | 11.x | Frontend packages |
 | Rust + Cargo | **install required** | Tauri 2 + crates |
-| WDK | **not detected** | Virtual driver work blocked until installed; use fallback backends |
+| WDK km headers | **partial** (SDK 10.0.26100 `ntddk.h`, `portcls.h`) | Driver scaffold in `native/driver/` |
+| WDK VS toolset | **not detected** (`WindowsKernelModeDriver10.0`) | Required to compile driver; use WASAPI fallback until installed |
 
 ## Install Rust (required)
 
@@ -43,9 +44,17 @@ cmake --version
 
 ## WDK / driver signing
 
-Kernel-mode virtual audio driver packaging requires the Windows Driver Kit and a signing story.
+First-party virtual endpoints (**MixBridge Output** / **MixBridge Input**) live in `native/driver/`.
 
-If WDK or signing is unavailable:
+Build requirements:
+
+1. Windows Driver Kit + Visual Studio extension (`WindowsKernelModeDriver10.0` toolset)
+2. KMDF headers (`wdf.h` under `Include\wdf\kmdf\`) — present on this machine
+3. Test signing for local install (`native/driver/README.md`); production requires EV / Hardware Dev Center signing
+
+Until the driver is installed, Live broadcast uses **WASAPI render to a user-selected endpoint** (Phase 6.1). See `docs/AUDIO_PIPELINE.md`.
+
+If WDK compile or production signing is unavailable:
 
 1. Document the blocker in `docs/TROUBLESHOOTING.md` and QA evidence.
 2. Continue with validated user-mode fallback backends (compatible virtual cable / test loopback).

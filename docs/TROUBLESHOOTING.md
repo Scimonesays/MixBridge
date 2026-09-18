@@ -2,9 +2,21 @@
 
 ## WDK / virtual driver
 
-**Symptom:** Cannot build `native/driver/`.  
-**Cause:** Windows Driver Kit km headers not installed on the current machine.  
-**Action:** Install WDK matching installed Windows SDK. Until then, use test loopback / optional external virtual cable backends. Do not stop app development.
+**Symptom:** `MSB8020: WindowsKernelModeDriver10.0 build tools cannot be found` when running `native/driver/scripts/build.ps1`.  
+**Cause:** WDK Visual Studio extension not installed (SDK km headers alone are insufficient).  
+**Action:** Install [WDK](https://learn.microsoft.com/en-us/windows-hardware/drivers/download-the-wdk) matching SDK 10.0.26100. Re-run build script.
+
+**Symptom:** Compile errors on `#include <wdf.h>`.  
+**Cause:** KMDF include path not on machine (check `Windows Kits\10\Include\wdf\kmdf\`).  
+**Action:** Install full WDK VS extension. Architecture is PortCls + KMDF miniport (MIT Virtual-Audio-Driver pattern).
+
+**Symptom:** Driver build succeeds but Windows refuses to load `.sys`.  
+**Cause:** Unsigned kernel driver (production EV signing not configured).  
+**Action:** Use test-signing path in `native/driver/README.md` (`bcdedit /set testsigning on`, reboot, `install-testsign.ps1`). Do not disable unrelated security policies.
+
+**Symptom:** Discord has no MixBridge mic.  
+**Cause:** Driver not installed; Live still on WASAPI render / external cable path.  
+**Action:** Select a working render endpoint in MixBridge Live settings, or install test-signed driver and choose **MixBridge Output** as mic input.
 
 ## Process loopback fails
 

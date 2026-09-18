@@ -28,6 +28,13 @@ struct SourceSlot {
   std::wstring device_id;
   std::string name;
 
+  // Optional FX hook (set from control thread; process from audio thread).
+  using FxProcessFn = void (*)(void* ctx, float* interleaved_stereo, uint32_t frames);
+  std::atomic<void*> fx_ctx{nullptr};
+  std::atomic<FxProcessFn> fx_process{nullptr};
+  std::atomic<bool> fx_bypass{true};
+  std::string fx_name;
+
   SpscFloatRing ring{kRingFrames};
   AtomicMeter meter{};
   double tone_phase = 0.0;  // audio-thread only

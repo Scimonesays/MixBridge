@@ -41,6 +41,12 @@ html, body {
   gap: 1rem;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .logo {
   width: 48px;
   height: 48px;
@@ -205,8 +211,19 @@ html, body {
 .dest-card.unavailable {
   opacity: 0.32;
 }
+.dest-card.needs-attention {
+  opacity: 1;
+  border-color: rgba(230, 53, 85, 0.65);
+  box-shadow: 0 0 0 1px rgba(230, 53, 85, 0.35), 0 0 22px rgba(230, 53, 85, 0.28);
+  animation: air-pulse 1.2s ease-in-out infinite;
+}
 
-.source-card .glyph,
+.identity.fx-label {
+  color: var(--violet);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+
 .dest-card .glyph {
   width: 26px;
   height: 26px;
@@ -325,7 +342,7 @@ html, body {
 }
 .picker-choices {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 0.75rem;
 }
 .choice {

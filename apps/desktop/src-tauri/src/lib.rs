@@ -50,10 +50,12 @@ struct SourceDto {
   id: u32,
   kind: String,
   name: String,
+  device_id: String,
   gain: f32,
   mute: bool,
   monitor: bool,
   broadcast: bool,
+  fx: String,
 }
 
 fn open_pipe() -> Result<(std::fs::File, BufReader<std::fs::File>), String> {
@@ -361,10 +363,9 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
       .unwrap_or(0);
     let kind = parse_field(&parts, "KIND").unwrap_or("unknown").to_string();
     let name = if let Some(i) = parts.iter().position(|t| *t == "NAME") {
-      // NAME ... GAIN
       let mut end = parts.len();
       for (j, t) in parts.iter().enumerate().skip(i + 1) {
-        if *t == "GAIN" {
+        if *t == "DEVICE" || *t == "GAIN" {
           end = j;
           break;
         }
@@ -373,21 +374,32 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
     } else {
       String::new()
     };
+    let device_id = parse_field(&parts, "DEVICE")
+      .filter(|s| *s != "-")
+      .unwrap_or("")
+      .to_string();
     let gain = parse_field(&parts, "GAIN")
       .and_then(|s| s.parse().ok())
       .unwrap_or(1.0);
     let mute = parse_field(&parts, "MUTE") == Some("1");
     let monitor = parse_field(&parts, "MONITOR") != Some("0");
     let broadcast = parse_field(&parts, "BROADCAST") != Some("0");
+    let fx = if let Some(i) = parts.iter().position(|t| *t == "FX") {
+      parts[i + 1..].join(" ")
+    } else {
+      String::new()
+    };
     if id > 0 {
       out.push(SourceDto {
         id,
         kind,
         name,
+        device_id,
         gain,
         mute,
         monitor,
         broadcast,
+        fx,
       });
     }
   }
@@ -473,6 +485,158 @@ fn engine_set_broadcast(app: tauri::AppHandle, id: u32, enabled: bool) -> Result
   }
 }
 
+#[derive(Serialize, Clone)]
+struct PluginDto {
+  name: String,
+  path: String,
+  quarantine: bool,
+}
+
+#[tauri::command]
+fn engine_list_vst3(app: tauri::AppHandle) -> Result<Vec<PluginDto>, String> {
+  ensure_engine_process(&app)?;
+  let lines = pipe_command_until_end("LIST_VST3")?;
+  let mut out = Vec::new();
+  for line in lines {
+    if !line.starts_with("PLUGIN ") {
+      continue;
+    }
+    // PLUGIN NAME <name...> QUARANTINE <0|1> PATH <path...>
+    if let Some(rest) = line.strip_prefix("PLUGIN NAME ") {
+      if let Some((name_q, path)) = rest.split_once(" PATH ") {
+        if let Some((name, q)) = name_q.rsplit_once(" QUARANTINE ") {
+          out.push(PluginDto {
+            name: name.to_string(),
+            path: path.to_string(),
+            quarantine: q.trim() == "1",
+          });
+        }
+      }
+    }
+  }
+  Ok(out)
+}
+
+#[tauri::command]
+fn engine_add_fx(app: tauri::AppHandle, id: u32, path: String) -> Result<String, String> {
+  ensure_running(&app)?;
+  let raw = pipe_command(&format!("ADD_FX {id} {path}"))?;
+  if raw.starts_with("OK") {
+    Ok(raw)
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_remove_fx(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("REMOVE_FX {id}"))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_set_fx_bypass(app: tauri::AppHandle, id: u32, bypass: bool) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!(
+    "SET_FX_BYPASS {id} {}",
+    if bypass { 1 } else { 0 }
+  ))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_save_fx_state(app: tauri::AppHandle, id: u32, index: u32) -> Result<String, String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("GET_FX_STATE {id} {index}"))?;
+  if !raw.starts_with("OK") {
+    return Err(raw);
+  }
+  let parts: Vec<&str> = raw.split_whitespace().collect();
+  parse_field(&parts, "PATH")
+    .map(|s| s.to_string())
+    .ok_or_else(|| raw.clone())
+}
+
+#[tauri::command]
+fn engine_load_fx_state(app: tauri::AppHandle, id: u32, index: u32, path: String) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("SET_FX_STATE {id} {index} {path}"))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_open_fx_editor(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("OPEN_FX_EDITOR {id}"))?;
+  if raw.starts_with("OK") {
+    Ok(())
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn session_save(name: String, json: String) -> Result<String, String> {
+  let base = std::env::var("LOCALAPPDATA").map_err(|e| e.to_string())?;
+  let dir = std::path::PathBuf::from(base).join("MixBridge").join("presets");
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  let safe: String = name
+    .chars()
+    .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+      c
+    } else {
+      '_'
+    })
+    .collect();
+  let path = dir.join(format!("{safe}.json"));
+  std::fs::write(&path, json).map_err(|e| e.to_string())?;
+  Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn session_load(name: String) -> Result<String, String> {
+  let base = std::env::var("LOCALAPPDATA").map_err(|e| e.to_string())?;
+  let path = std::path::PathBuf::from(base)
+    .join("MixBridge")
+    .join("presets")
+    .join(format!("{name}.json"));
+  std::fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn session_list() -> Result<Vec<String>, String> {
+  let base = std::env::var("LOCALAPPDATA").map_err(|e| e.to_string())?;
+  let dir = std::path::PathBuf::from(base).join("MixBridge").join("presets");
+  if !dir.exists() {
+    return Ok(vec![]);
+  }
+  let mut out = Vec::new();
+  for e in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+    let e = e.map_err(|e| e.to_string())?;
+    let p = e.path();
+    if p.extension().and_then(|s| s.to_str()) == Some("json") {
+      if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+        out.push(stem.to_string());
+      }
+    }
+  }
+  out.sort();
+  Ok(out)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -491,15 +655,25 @@ pub fn run() {
       engine_list_render,
       engine_list_processes,
       engine_list_sources,
+      engine_list_vst3,
       engine_set_live_device,
       engine_add_physical,
       engine_add_process,
       engine_add_tone,
       engine_remove_source,
+      engine_add_fx,
+      engine_remove_fx,
+      engine_set_fx_bypass,
+      engine_open_fx_editor,
+      engine_save_fx_state,
+      engine_load_fx_state,
       engine_set_gain,
       engine_set_mute,
       engine_set_monitor,
-      engine_set_broadcast
+      engine_set_broadcast,
+      session_save,
+      session_load,
+      session_list
     ])
     .run(tauri::generate_context!())
     .expect("error while running MixBridge");

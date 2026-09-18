@@ -56,6 +56,12 @@ void process_chunk(
       for (uint32_t i = got; i < need; ++i) src_buf[i] = 0.0f;
     }
 
+    auto fx = slot.fx_process.load(std::memory_order_relaxed);
+    void* fx_ctx = slot.fx_ctx.load(std::memory_order_relaxed);
+    if (fx && fx_ctx && !slot.fx_bypass.load(std::memory_order_relaxed)) {
+      fx(fx_ctx, src_buf, frames);
+    }
+
     slot.meter.accumulate(src_buf, frames, kEngineChannels);
 
     for (uint32_t i = 0; i < frames; ++i) {

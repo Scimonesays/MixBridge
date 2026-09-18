@@ -20,7 +20,8 @@ Filesystem scanner (`mb-vst3-scan`) done. Full load/editor/state awaits pinned V
 
 ## Phase 6 — Virtual output
 - **6.1** Live WASAPI render destination (user-selected endpoint / virtual cable) — **done**; enables real On Air.
-- **6.2** First-party MixBridge Output VAD — **blocked on WDK/signing**; scaffold in `native/driver/`.
+- **6.2** First-party MixBridge Output VAD — **scaffolded** in `native/driver/` (PortCls + KMDF); compile blocked on `WindowsKernelModeDriver10.0` toolset; install blocked on test/production signing until built.
+- **Live path today:** WASAPI render to user-selected endpoint (6.1) until driver installed — see `docs/AUDIO_PIPELINE.md`.
 
 ## Phase 7 — Product UX
 Icon-first home screen, source picker, presets, first-run.

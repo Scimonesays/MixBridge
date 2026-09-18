@@ -9,7 +9,16 @@ Date: 2026-09-17 (Phase 3 measured)
 | Rate | 48,000 Hz |
 | Sample format | float32 interleaved |
 | Channels | stereo master (mono sources upmixed) |
-| Buses | Monitor (wired to WASAPI render), Broadcast (mixed + safety limiter; virtual out later) |
+| Buses | Monitor (wired to WASAPI render), Broadcast (mixed + safety limiter) |
+
+## Live / broadcast output path
+
+| Stage | Current (Phase 6.1) | Target (Phase 6 + driver) |
+|-------|---------------------|---------------------------|
+| Engine render sink | User-selected WASAPI **render** endpoint (virtual cable or physical device) | **MixBridge Input** (first-party virtual speaker) |
+| App mic source (Discord, OBS) | External virtual cable loopback, if configured | **MixBridge Output** (first-party virtual mic) |
+
+Until `native/driver/` is built, test-signed, and installed, **Live uses WASAPI render only**. Do not claim Discord receives audio unless a real endpoint is selected and verified.
 
 ## Realtime architecture (implemented)
 
