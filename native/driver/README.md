@@ -1,31 +1,30 @@
-# MixBridge virtual audio device (Phase 6)
+# MixBridge virtual audio device track
 
-## Goal
+## V1 application path
 
-Expose a Windows capture endpoint named **MixBridge Output** that applications
-(Discord, OBS, Zoom) can select as a microphone.
+MixBridge V1 renders its broadcast bus to a **real Windows Live output selected by the user**. With a compatible installed virtual cable/loopback endpoint:
 
-## Status
+```text
+MixBridge Live mix → virtual-cable render side → virtual-cable capture side → Discord
+```
 
-| Path | Status |
-|------|--------|
-| Broadcast bus in engine | Done |
-| Live WASAPI render to selected endpoint | Phase 6.1 (user-selected render / virtual cable) |
-| First-party MixBridge VAD (WDK) | Blocked until WDK + signing available |
-| External virtual cable fallback | Supported via Live output picker (not bundled) |
+This path is implemented and is the supported V1 route.
 
-## WDK blocker
+## First-party endpoint goal
 
-This machine may not have the Windows Driver Kit installed. Absence of WDK must
-not stop application development. Prefer:
+A later signed Windows capture endpoint named **MixBridge Output** would let Discord/OBS select MixBridge directly.
 
-1. Continue shipping the Live render-destination path (Phase 6.1)
-2. Document production signing for a future `MixBridge Output` driver
-3. Never claim Discord receives audio unless a real endpoint is selected
+| Requirement | Status |
+|---|---|
+| Broadcast bus | Done |
+| Real selected Live WASAPI output | Done |
+| External virtual endpoint compatibility | Supported; not bundled |
+| User-mode → kernel MixBridge audio transport | Not implemented |
+| WDK build matrix | Not completed |
+| Production/attestation signing | External prerequisite |
+| Signed install/update/uninstall proof | Not run |
+| Signed Discord/OBS capture proof | Not run |
 
-## Legal isolation
+A SysVAD-derived/open driver is not complete merely because it installs or is renamed. Actual MixBridge audio must reach the capture endpoint and the package must be production-signed.
 
-If adapting SysVAD (MS-PL) or MIT Virtual-Audio-Driver material, keep sources
-under this tree with notices. Do not mix MS-PL into MIT-only libraries.
-
-See `docs/legal/LICENSE_MATRIX.md` and `docs/research/UPSTREAM_REVIEW.md`.
+The first-party driver is therefore a separately gated post-V1 deliverable.
