@@ -2,12 +2,14 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::Manager;
 
 static ENGINE: Lazy<Mutex<EngineClient>> = Lazy::new(|| Mutex::new(EngineClient::default()));
+static VST3_CACHE: Lazy<Mutex<Option<Vec<PluginDto>>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Default)]
 struct EngineClient {
@@ -55,6 +57,16 @@ struct SourceDto {
   mute: bool,
   monitor: bool,
   broadcast: bool,
+  effect_name: String,
+  effect_path: String,
+  effect_bypass: bool,
+  effect_faulted: bool,
+}
+
+#[derive(Serialize, Clone)]
+struct PluginDto {
+  name: String,
+  path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -91,6 +103,59 @@ struct SessionDto {
 
 fn default_gain() -> f32 { 1.0 }
 fn default_true() -> bool { true }
+
+fn vst3_name(path: &Path) -> String {
+  path.file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or("VST3")
+    .to_string()
+}
+
+fn scan_vst3_folder(root: &Path, out: &mut Vec<PluginDto>) {
+  let Ok(entries) = fs::read_dir(root) else { return; };
+  for entry in entries.flatten() {
+    let path = entry.path();
+    let is_vst3 = path
+      .extension()
+      .and_then(|s| s.to_str())
+      .map(|s| s.eq_ignore_ascii_case("vst3"))
+      .unwrap_or(false);
+    if is_vst3 {
+      out.push(PluginDto {
+        name: vst3_name(&path),
+        path: path.to_string_lossy().to_string(),
+      });
+      continue;
+    }
+    if path.is_dir() {
+      scan_vst3_folder(&path, out);
+    }
+  }
+}
+
+fn scan_vst3_plugins() -> Vec<PluginDto> {
+  let mut roots = vec![
+    PathBuf::from(r"C:\Program Files\Common Files\VST3"),
+    PathBuf::from(r"C:\Program Files\VST3"),
+  ];
+  if let Some(pf) = std::env::var_os("ProgramFiles") {
+    roots.push(PathBuf::from(pf).join("Common Files").join("VST3"));
+  }
+  if let Some(pd) = std::env::var_os("ProgramData") {
+    roots.push(PathBuf::from(pd).join("VST3"));
+  }
+  if let Some(la) = std::env::var_os("LOCALAPPDATA") {
+    roots.push(PathBuf::from(la).join("VST3"));
+  }
+
+  let mut out = Vec::new();
+  for root in roots {
+    scan_vst3_folder(&root, &mut out);
+  }
+  out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+  out.dedup_by(|a, b| a.path.eq_ignore_ascii_case(&b.path));
+  out
+}
 
 fn session_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
   let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -432,6 +497,22 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
     let mute = parse_field(&parts, "MUTE") == Some("1");
     let monitor = parse_field(&parts, "MONITOR") != Some("0");
     let broadcast = parse_field(&parts, "BROADCAST") != Some("0");
+    let effect_bypass = parse_field(&parts, "FX_BYPASS") == Some("1");
+    let effect_faulted = parse_field(&parts, "FX_FAULT") == Some("1");
+    let effect_name = if let Some(i) = parts.iter().position(|t| *t == "FX_NAME") {
+      let end = parts.iter().enumerate().skip(i + 1)
+        .find(|(_, t)| **t == "FX_PATH")
+        .map(|(j, _)| j)
+        .unwrap_or(parts.len());
+      parts[i + 1..end].join(" ")
+    } else {
+      String::new()
+    };
+    let effect_path = if let Some(i) = parts.iter().position(|t| *t == "FX_PATH") {
+      parts[i + 1..].join(" ")
+    } else {
+      String::new()
+    };
     if id > 0 {
       out.push(SourceDto {
         id,
@@ -441,6 +522,10 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
         mute,
         monitor,
         broadcast,
+        effect_name,
+        effect_path,
+        effect_bypass,
+        effect_faulted,
       });
     }
   }
@@ -474,6 +559,36 @@ fn engine_remove_source(app: tauri::AppHandle, id: u32) -> Result<(), String> {
   } else {
     Err(raw)
   }
+}
+
+#[tauri::command]
+fn vst3_list(refresh: bool) -> Result<Vec<PluginDto>, String> {
+  let mut cache = VST3_CACHE.lock().map_err(|e| e.to_string())?;
+  if refresh || cache.is_none() {
+    *cache = Some(scan_vst3_plugins());
+  }
+  Ok(cache.as_ref().cloned().unwrap_or_default())
+}
+
+#[tauri::command]
+fn engine_set_vst3(app: tauri::AppHandle, id: u32, module_path: String) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("SET_FX {id} {module_path}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
+fn engine_clear_vst3(app: tauri::AppHandle, id: u32) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("CLEAR_FX {id}"))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
+fn engine_set_vst3_bypass(app: tauri::AppHandle, id: u32, bypass: bool) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = pipe_command(&format!("FX_BYPASS {id} {}", if bypass { 1 } else { 0 }))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
 }
 
 #[tauri::command]
@@ -575,6 +690,10 @@ pub fn run() {
       engine_add_process,
       engine_add_tone,
       engine_remove_source,
+      vst3_list,
+      engine_set_vst3,
+      engine_clear_vst3,
+      engine_set_vst3_bypass,
       engine_set_gain,
       engine_set_mute,
       engine_set_monitor,
