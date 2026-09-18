@@ -23,6 +23,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <objbase.h>
 #endif
 
 namespace mixbridge::vst3 {
