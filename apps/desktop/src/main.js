@@ -14,7 +14,7 @@ const btnAdd = document.getElementById("btn-add");
 const picker = document.getElementById("picker");
 const pickerRoot = document.getElementById("picker-root");
 
-/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean}>} */
+/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string}>} */
 const sources = new Map();
 
 let onAir = false;
@@ -118,6 +118,7 @@ function sourceToSession(src) {
     broadcast: src.broadcast,
     fx: src.effectPath ? [src.effectPath] : [],
     fx_bypass: !!src.effectBypass,
+    fx_state_file: src.effectStateFile || "",
   };
 }
 
@@ -136,6 +137,19 @@ function buildSession() {
     live_device_id: liveDestId,
     sources: active,
   };
+}
+
+async function captureEffectState(src) {
+  if (!src?.effectPath) return;
+  try {
+    const result = await invoke("engine_save_vst3_state", {
+      id: src.id,
+      stateFile: src.effectStateFile || null,
+    });
+    src.effectStateFile = result.file;
+  } catch (e) {
+    console.warn("MixBridge plugin state save failed", e);
+  }
 }
 
 async function saveSessionNow() {
@@ -160,6 +174,13 @@ async function applySourceSettings(id, cfg) {
   await invoke("engine_set_broadcast", { id, enabled: cfg.broadcast !== false });
   if (Array.isArray(cfg.fx) && cfg.fx[0]) {
     await invoke("engine_set_vst3", { id, modulePath: cfg.fx[0] });
+    if (cfg.fx_state_file) {
+      try {
+        await invoke("engine_load_vst3_state", { id, stateFile: cfg.fx_state_file });
+      } catch (e) {
+        console.warn("MixBridge plugin state restore failed", e);
+      }
+    }
     if (cfg.fx_bypass) {
       await invoke("engine_set_vst3_bypass", { id, bypass: true });
     }
@@ -198,6 +219,7 @@ async function tryRestorePendingSources() {
             effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
             effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
             effectBypass: !!cfg.fx_bypass,
+            effectStateFile: cfg.fx_state_file || "",
           });
           continue;
         }
@@ -224,6 +246,7 @@ async function tryRestorePendingSources() {
             effectPath: Array.isArray(cfg.fx) ? (cfg.fx[0] || "") : "",
             effectName: Array.isArray(cfg.fx) && cfg.fx[0] ? pluginNameFromPath(cfg.fx[0]) : "",
             effectBypass: !!cfg.fx_bypass,
+            effectStateFile: cfg.fx_state_file || "",
           });
           continue;
         }
@@ -387,6 +410,7 @@ function upsertSource(dto) {
     effectPath: dto.effect_path ?? dto.effectPath ?? previous.effectPath ?? "",
     effectBypass: dto.effect_bypass ?? dto.effectBypass ?? previous.effectBypass ?? false,
     effectFaulted: dto.effect_faulted ?? dto.effectFaulted ?? previous.effectFaulted ?? false,
+    effectStateFile: dto.effectStateFile ?? previous.effectStateFile ?? "",
   });
 }
 
@@ -540,6 +564,7 @@ async function showEffectList(src) {
         src.effectPath = "";
         src.effectBypass = false;
         src.effectFaulted = false;
+        src.effectStateFile = "";
         renderSources();
         scheduleSessionSave();
         closePicker();
@@ -568,6 +593,8 @@ async function showEffectList(src) {
           src.effectPath = plugin.path;
           src.effectBypass = false;
           src.effectFaulted = false;
+          src.effectStateFile = "";
+          await captureEffectState(src);
           renderSources();
           scheduleSessionSave();
           closePicker();

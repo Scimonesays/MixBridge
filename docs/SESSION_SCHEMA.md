@@ -21,7 +21,8 @@ The product default is a quiet auto-save/auto-restore flow: source/device choice
       "monitor": true,
       "broadcast": true,
       "fx": [],
-      "fx_bypass": false
+      "fx_bypass": false,
+      "fx_state_file": ""
     },
     {
       "kind": "process",
@@ -43,5 +44,5 @@ Current behavior:
 - physical sources restore by endpoint ID, with friendly-name fallback;
 - application sources restore by process name and retry when the app starts later;
 - gain, mute, monitor route, and broadcast route persist;
-- the current VST3 insert path and bypass state persist;
+- the current VST3 insert path, bypass state, and full processor/controller snapshot persist;
 - `fx` remains an array so later plugin-chain expansion does not require replacing the session shape.

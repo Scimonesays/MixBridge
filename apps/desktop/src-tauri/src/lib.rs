@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 static ENGINE: Lazy<Mutex<EngineClient>> = Lazy::new(|| Mutex::new(EngineClient::default()));
@@ -69,6 +69,11 @@ struct PluginDto {
   path: String,
 }
 
+#[derive(Serialize)]
+struct StateFileDto {
+  file: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct SessionSourceDto {
   kind: String,
@@ -89,6 +94,8 @@ struct SessionSourceDto {
   fx: Vec<String>,
   #[serde(default)]
   fx_bypass: bool,
+  #[serde(default)]
+  fx_state_file: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -163,6 +170,23 @@ fn session_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
   let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
   fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
   Ok(dir.join("last-session.json"))
+}
+
+fn plugin_state_path(app: &tauri::AppHandle, file: &str) -> Result<PathBuf, String> {
+  if file.is_empty() || Path::new(file).file_name().and_then(|v| v.to_str()) != Some(file) {
+    return Err("invalid_plugin_state_file".into());
+  }
+  let dir = app.path().app_config_dir().map_err(|e| e.to_string())?.join("plugin-state");
+  fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir.join(file))
+}
+
+fn new_plugin_state_file(id: u32) -> String {
+  let stamp = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap_or_default()
+    .as_millis();
+  format!("fx-{id}-{stamp}.mbfx")
 }
 
 fn open_pipe() -> Result<(std::fs::File, BufReader<std::fs::File>), String> {
@@ -610,6 +634,38 @@ fn engine_set_vst3_bypass(app: tauri::AppHandle, id: u32, bypass: bool) -> Resul
 }
 
 #[tauri::command]
+fn engine_save_vst3_state(
+  app: tauri::AppHandle,
+  id: u32,
+  state_file: Option<String>,
+) -> Result<StateFileDto, String> {
+  ensure_engine_process(&app)?;
+  let file = state_file.filter(|s| !s.is_empty()).unwrap_or_else(|| new_plugin_state_file(id));
+  let path = plugin_state_path(&app, &file)?;
+  let raw = pipe_command(&format!("SAVE_FX_STATE {id} {}", path.to_string_lossy()))?;
+  if raw.starts_with("OK") {
+    Ok(StateFileDto { file })
+  } else {
+    Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_load_vst3_state(
+  app: tauri::AppHandle,
+  id: u32,
+  state_file: String,
+) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let path = plugin_state_path(&app, &state_file)?;
+  if !path.exists() {
+    return Err("plugin_state_missing".into());
+  }
+  let raw = pipe_command(&format!("LOAD_FX_STATE {id} {}", path.to_string_lossy()))?;
+  if raw.starts_with("OK") { Ok(()) } else { Err(raw) }
+}
+
+#[tauri::command]
 fn engine_set_gain(app: tauri::AppHandle, id: u32, gain: f32) -> Result<(), String> {
   ensure_engine_process(&app)?;
   let raw = pipe_command(&format!("SET_GAIN {id} {gain}"))?;
@@ -712,6 +768,8 @@ pub fn run() {
       engine_set_vst3,
       engine_clear_vst3,
       engine_set_vst3_bypass,
+      engine_save_vst3_state,
+      engine_load_vst3_state,
       engine_set_gain,
       engine_set_mute,
       engine_set_monitor,
