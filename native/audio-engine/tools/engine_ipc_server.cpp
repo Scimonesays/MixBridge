@@ -322,8 +322,12 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe
           if (!chain) chain = std::make_unique<FxChain>();
           chain->plugs.push_back(std::move(proc));
           rebind_fx(engine, fx_map, id);
-          write_line(pipe, "OK FX " + chain_display_name(*fx_map[id]) + " INDEX " +
-                             std::to_string(fx_map[id]->plugs.size() - 1));
+          if (engine.source_fx_name(id).empty()) {
+            write_line(pipe, "ERR fx_bind_failed");
+          } else {
+            write_line(pipe, "OK FX " + chain_display_name(*fx_map[id]) + " INDEX " +
+                               std::to_string(fx_map[id]->plugs.size() - 1));
+          }
         }
       }
     } else if (cmd == "REMOVE_FX") {

@@ -99,7 +99,8 @@ Check ($fx -match "OK FX") "Guitar Rig on physical ($fx)"
 
 Invoke-Mb "SET_GAIN $physId 0.7" | Out-Null
 Invoke-Mb "SET_GAIN $appId 0.4" | Out-Null
-Invoke-Mb "SET_MUTE $appId 1" | Out-Null
+$mute = Invoke-Mb "SET_MUTE $appId 1"
+Check ($mute -match "^OK") "mute app command ($mute)"
 Invoke-Mb "SET_MONITOR $physId 1" | Out-Null
 Invoke-Mb "SET_BROADCAST $physId 1" | Out-Null
 Invoke-Mb "SET_BROADCAST $appId 0" | Out-Null
@@ -107,8 +108,9 @@ Invoke-Mb "SET_BROADCAST $appId 0" | Out-Null
 $src = (Invoke-MbLines "LIST_SOURCES") -join "`n"
 Check ($src -match "SOURCE ID $physId") "physical listed"
 Check ($src -match "SOURCE ID $appId") "app listed"
-Check ($src -match "MUTE 1") "app muted independently"
-Check ($src -match "Guitar Rig") "FX name published"
+Check ($src -match "MUTE 1") "app muted independently ($src)"
+$fxList = (Invoke-MbLines "LIST_FX $physId") -join "`n"
+Check ($fxList -match "Guitar Rig") "FX listed on physical ($fxList)"
 
 Start-Sleep -Milliseconds 600
 $pPhys = [double](Get-Field (Invoke-Mb "METER_SOURCE $physId") "PEAK")
@@ -120,7 +122,8 @@ Check ((Invoke-Mb "REMOVE $appId") -match "OK REMOVED") "remove app only"
 $src2 = (Invoke-MbLines "LIST_SOURCES") -join "`n"
 Check ($src2 -match "SOURCE ID $physId") "physical remains"
 Check ($src2 -notmatch "SOURCE ID $appId") "app gone"
-Check ($src2 -match "Guitar Rig") "GR remains on physical"
+$fxList2 = (Invoke-MbLines "LIST_FX $physId") -join "`n"
+Check ($fxList2 -match "Guitar Rig") "GR remains on physical ($fxList2)"
 
 Invoke-Mb "SHUTDOWN" | Out-Null
 if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }

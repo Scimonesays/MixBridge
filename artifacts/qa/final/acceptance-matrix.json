@@ -1,5 +1,5 @@
 {
-  "date": "2026-09-18T00:30:00Z",
+  "date": "2026-09-18T00:40:00Z",
   "machine": "Windows 11 + RME Fireface UC",
   "gates": {
     "A_build": "PASS",
@@ -26,7 +26,7 @@
     "V_offline": "PASS",
     "W_ux": "PASS",
     "X_accessibility": "PARTIAL",
-    "Y_screenshots": "NOT_RUN",
+    "Y_screenshots": "PARTIAL",
     "Z_screenshot_quality": "NOT_RUN",
     "AA_uninstall": "NOT_RUN",
     "AB_license": "PARTIAL",
@@ -34,21 +34,24 @@
   },
   "artifacts": {
     "desktop_exe": "apps/desktop/src-tauri/target/release/mixbridge-desktop.exe",
+    "nsis_setup": "apps/desktop/src-tauri/target/release/bundle/nsis/MixBridge_0.1.0_x64-setup.exe",
     "phase5_fx": "scripts/prove-phase5-fx.ps1 PASS",
-    "dual_source_gr": "scripts/prove-dual-source-gr.ps1 PASS"
+    "dual_source_gr": "scripts/prove-dual-source-gr.ps1 PASS",
+    "screenshots": "artifacts/qa/final/screenshots/01-standby.png (+ checklist README)",
+    "final_summary": "artifacts/qa/final/FINAL_SUMMARY.md"
   },
   "notes": {
     "H_vst3": "Guitar Rig 6 process + engine FX path proven",
-    "K_virtual_output": "6.1 WASAPI live dest PASS; first-party MixBridge Output blocked on WindowsKernelModeDriver10.0 toolset (WDK installed; VS extension install in progress)",
+    "K_virtual_output": "6.1 WASAPI live dest PASS; MixBridge Output blocked — WDK 26100 installed but WindowsKernelModeDriver10.0 toolset missing (only v143 under BuildTools)",
+    "B_install": "NSIS MixBridge_0.1.0_x64-setup.exe built (~2.7MB); clean install/uninstall smoke NOT_RUN",
     "O_presets": "Discord Jam save/load wired; timing via console preset_restore_ms",
-    "B_install": "Release exe built; NSIS bundle enabling in progress",
-    "L_discord": "No VB-CABLE/MixBridge Output on machine yet; Live render endpoints are RME + NVIDIA only",
-    "J_midi": "Spec only; no winmm MIDI input yet (tone path exists without note injection)",
-    "Y_screenshots": "Checklist ready at artifacts/qa/final/screenshots/README.md; capture via scripts/capture-screenshots.ps1 — PNGs NOT_RUN"
+    "L_discord": "Blocked until MixBridge Output or external virtual cable capture endpoint exists",
+    "Y_screenshots": "01-standby captured; 02-07 pending doctrine set",
+    "J_midi": "Spec only; tone instruments work without MIDI"
   },
   "external_blockers": [
-    "WindowsKernelModeDriver10.0 platform toolset (installing VS WDK component)",
+    "WindowsKernelModeDriver10.0 platform toolset (VS BuildTools ↔ WDK extension) — quiet install did not register toolset",
     "Production EV code signing certificate not available",
-    "No virtual cable endpoint present for Discord mic path until driver or external cable"
+    "No virtual cable / MixBridge Output capture endpoint for Discord mic path"
   ]
 }

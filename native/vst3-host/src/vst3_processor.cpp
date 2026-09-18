@@ -113,10 +113,15 @@ bool Processor::load(const std::string& path, std::string& error) {
   impl_->processor = proc;
   path_ = path;
   name_ = module->getName();
-  if (name_.empty() || name_.find('\\') != std::string::npos || name_.find('/') != std::string::npos) {
+  // Prefer a short UI name; Module::getName() sometimes returns a filesystem path.
+  {
     const auto slash = path.find_last_of("\\/");
-    name_ = (slash == std::string::npos) ? path : path.substr(slash + 1);
-    if (name_.size() > 5 && name_.compare(name_.size() - 5, 5, ".vst3") == 0) name_.resize(name_.size() - 5);
+    std::string stem = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    if (stem.size() > 5 && stem.compare(stem.size() - 5, 5, ".vst3") == 0) stem.resize(stem.size() - 5);
+    if (name_.empty() || name_.find('\\') != std::string::npos || name_.find('/') != std::string::npos ||
+        name_.size() > 64) {
+      name_ = stem;
+    }
   }
   loaded_ = true;
   prepared_ = false;
