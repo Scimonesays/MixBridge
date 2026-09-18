@@ -268,6 +268,20 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       iss >> id >> enabled;
       if (engine.set_source_effect_bypass(id, enabled != 0, err)) write_line(pipe, "OK FX_BYPASS");
       else write_line(pipe, "ERR " + err);
+    } else if (cmd == "SAVE_FX_STATE") {
+      uint32_t id = 0;
+      iss >> id;
+      std::string path;
+      std::getline(iss >> std::ws, path);
+      if (engine.save_source_effect_state(id, path, err)) write_line(pipe, "OK FX_STATE_SAVED");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "LOAD_FX_STATE") {
+      uint32_t id = 0;
+      iss >> id;
+      std::string path;
+      std::getline(iss >> std::ws, path);
+      if (engine.load_source_effect_state(id, path, err)) write_line(pipe, "OK FX_STATE_LOADED");
+      else write_line(pipe, "ERR " + err);
     } else if (cmd == "SET_GAIN") {
       uint32_t id = 0;
       float g = 1.0f;

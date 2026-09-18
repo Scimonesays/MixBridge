@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace mixbridge {
@@ -16,6 +17,14 @@ public:
   virtual bool bypass() const noexcept { return false; }
   virtual bool faulted() const noexcept { return false; }
   virtual std::string_view name() const noexcept { return {}; }
+  virtual bool save_state_file(const std::string&, std::string& error) {
+    error = "effect_state_unsupported";
+    return false;
+  }
+  virtual bool load_state_file(const std::string&, std::string& error) {
+    error = "effect_state_unsupported";
+    return false;
+  }
 };
 
 }  // namespace mixbridge

@@ -467,6 +467,102 @@ bool Engine::set_source_effect_bypass(uint32_t id, bool bypass, std::string& err
   return false;
 }
 
+bool Engine::save_source_effect_state(
+  uint32_t id,
+  const std::string& path,
+  std::string& error) {
+  int index = -1;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id && effects_[i]) {
+        index = i;
+        break;
+      }
+    }
+  }
+  if (index < 0) {
+    error = "source effect not found";
+    return false;
+  }
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  bool ok_state = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (effects_[index] && slots_[index].id.load() == id) {
+      ok_state = effects_[index]->save_state_file(path, error);
+    } else {
+      error = "source effect changed during save";
+    }
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) {
+      if (error.empty()) error = "effect_state_monitor_resume_failed:" + resume_error;
+      return false;
+    }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      if (error.empty()) error = "effect_state_live_resume_failed:" + resume_error;
+      return false;
+    }
+  }
+  return ok_state;
+}
+
+bool Engine::load_source_effect_state(
+  uint32_t id,
+  const std::string& path,
+  std::string& error) {
+  int index = -1;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id && effects_[i]) {
+        index = i;
+        break;
+      }
+    }
+  }
+  if (index < 0) {
+    error = "source effect not found";
+    return false;
+  }
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  bool ok_state = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (effects_[index] && slots_[index].id.load() == id) {
+      ok_state = effects_[index]->load_state_file(path, error);
+    } else {
+      error = "source effect changed during load";
+    }
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) {
+      if (error.empty()) error = "effect_state_monitor_resume_failed:" + resume_error;
+      return false;
+    }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      if (error.empty()) error = "effect_state_live_resume_failed:" + resume_error;
+      return false;
+    }
+  }
+  return ok_state;
+}
+
 MeterSnapshot Engine::source_meter(uint32_t id) {
   if (auto* s = slot_by_id(id)) return s->meter.snapshot_and_reset();
   return {};
