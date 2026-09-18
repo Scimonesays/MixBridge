@@ -88,6 +88,10 @@ struct SourceInfo {
   bool monitor = true;
   bool broadcast = true;
   uint32_t process_id = 0;
+  std::string effect_name;
+  std::string effect_path;
+  bool effect_bypass = false;
+  bool effect_faulted = false;
 };
 
 }  // namespace mixbridge

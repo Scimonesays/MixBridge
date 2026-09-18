@@ -1,4 +1,5 @@
 #include "mixbridge/engine.hpp"
+#include "mixbridge/vst3_effect_factory.hpp"
 #include "mixbridge/wasapi_util.hpp"
 
 #include <windows.h>
@@ -28,7 +29,11 @@ void Engine::shutdown() {
   stop_live_thread();
   for (uint32_t i = 0; i < kMaxSources; ++i) {
     captures_[i].stop();
+    slots_[i].effect.store(nullptr, std::memory_order_release);
     slots_[i].active.store(false);
+    effects_[i].reset();
+    slots_[i].effect_name.clear();
+    slots_[i].effect_path.clear();
   }
   devices_.shutdown();
 }
@@ -71,6 +76,7 @@ std::vector<DeviceInfo> Engine::list_capture_devices() const { return devices_.l
 std::vector<DeviceInfo> Engine::list_render_devices() const { return devices_.list_render(); }
 
 std::vector<SourceInfo> Engine::list_sources() const {
+  std::lock_guard<std::mutex> lock(control_mu_);
   std::vector<SourceInfo> out;
   for (uint32_t i = 0; i < kMaxSources; ++i) {
     if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
@@ -83,6 +89,12 @@ std::vector<SourceInfo> Engine::list_sources() const {
     info.monitor = slots_[i].monitor.load(std::memory_order_relaxed);
     info.broadcast = slots_[i].broadcast.load(std::memory_order_relaxed);
     info.process_id = slots_[i].process_id.load(std::memory_order_relaxed);
+    info.effect_name = slots_[i].effect_name;
+    info.effect_path = slots_[i].effect_path;
+    if (auto* effect_ptr = slots_[i].effect.load(std::memory_order_acquire)) {
+      info.effect_bypass = effect_ptr->bypass();
+      info.effect_faulted = effect_ptr->faulted();
+    }
     out.push_back(std::move(info));
   }
   return out;
@@ -137,6 +149,8 @@ void Engine::free_slot(int index) {
   slots_[index].meter.reset();
   slots_[index].name.clear();
   slots_[index].device_id.clear();
+  slots_[index].effect_name.clear();
+  slots_[index].effect_path.clear();
 }
 
 SourceSlot* Engine::slot_by_id(uint32_t id) {
@@ -260,15 +274,51 @@ uint32_t Engine::add_process_loopback(const AddProcessRequest& req, std::string&
 }
 
 bool Engine::remove_source(uint32_t id, std::string& error) {
-  std::lock_guard<std::mutex> lock(control_mu_);
-  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
-    if (slots_[i].active.load() && slots_[i].id.load() == id) {
-      free_slot(i);
-      return true;
+  int index = -1;
+  bool has_effect = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id) {
+        index = i;
+        has_effect = effects_[i] != nullptr;
+        break;
+      }
     }
   }
-  error = "source not found";
-  return false;
+  if (index < 0) {
+    error = "source not found";
+    return false;
+  }
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (has_effect && was_running) stop();
+
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (!slots_[index].active.load() || slots_[index].id.load() != id) {
+      error = "source changed during remove";
+      return false;
+    }
+    slots_[index].effect.store(nullptr, std::memory_order_release);
+    free_slot(index);
+    effects_[index].reset();
+  }
+
+  if (has_effect && was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) {
+      error = "source_removed_monitor_resume_failed:" + resume_error;
+      return false;
+    }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      error = "source_removed_live_resume_failed:" + resume_error;
+      return false;
+    }
+  }
+  return true;
 }
 
 bool Engine::set_gain(uint32_t id, float gain) {
@@ -316,6 +366,105 @@ bool Engine::set_pan(uint32_t id, float pan) {
 bool Engine::set_master_gain(float gain) {
   master_gain_.store(std::clamp(gain, 0.0f, 4.0f));
   return true;
+}
+
+bool Engine::set_source_vst3(uint32_t id, const std::string& module_path, std::string& error) {
+  int index = -1;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id) { index = i; break; }
+    }
+  }
+  if (index < 0) { error = "source not found"; return false; }
+  if (module_path.empty()) return clear_source_effect(id, error);
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  auto effect_ptr = create_vst3_effect(module_path, error);
+  if (!effect_ptr) {
+    if (was_running) {
+      std::string resume_error;
+      if (!start(resume_error)) error += "|monitor_resume_failed:" + resume_error;
+      else if (was_live && live_destination_ready() && !enable_broadcast(resume_error))
+        error += "|live_resume_failed:" + resume_error;
+    }
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (!slots_[index].active.load() || slots_[index].id.load() != id) {
+      error = "source changed during effect load";
+      return false;
+    }
+    slots_[index].effect.store(nullptr, std::memory_order_release);
+    effects_[index] = std::move(effect_ptr);
+    slots_[index].effect_name = std::string(effects_[index]->name());
+    slots_[index].effect_path = module_path;
+    slots_[index].effect.store(effects_[index].get(), std::memory_order_release);
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) { error = "effect_loaded_monitor_resume_failed:" + resume_error; return false; }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      error = "effect_loaded_live_resume_failed:" + resume_error; return false;
+    }
+  }
+  return true;
+}
+
+bool Engine::clear_source_effect(uint32_t id, std::string& error) {
+  int index = -1;
+  bool has_effect = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id) {
+        index = i; has_effect = effects_[i] != nullptr; break;
+      }
+    }
+  }
+  if (index < 0) { error = "source not found"; return false; }
+  if (!has_effect) return true;
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    slots_[index].effect.store(nullptr, std::memory_order_release);
+    effects_[index].reset();
+    slots_[index].effect_name.clear();
+    slots_[index].effect_path.clear();
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) { error = "effect_cleared_monitor_resume_failed:" + resume_error; return false; }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      error = "effect_cleared_live_resume_failed:" + resume_error; return false;
+    }
+  }
+  return true;
+}
+
+bool Engine::set_source_effect_bypass(uint32_t id, bool bypass, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+    if (!slots_[i].active.load() || slots_[i].id.load() != id) continue;
+    if (!effects_[i]) { error = "source has no effect"; return false; }
+    effects_[i]->set_bypass(bypass);
+    return true;
+  }
+  error = "source not found";
+  return false;
 }
 
 MeterSnapshot Engine::source_meter(uint32_t id) {

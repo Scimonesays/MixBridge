@@ -29,6 +29,8 @@ struct SourceSlot {
   // Non-realtime metadata (do not touch from audio thread).
   std::wstring device_id;
   std::string name;
+  std::string effect_name;
+  std::string effect_path;
 
   SpscFloatRing ring{kRingFrames};
   AtomicMeter meter{};

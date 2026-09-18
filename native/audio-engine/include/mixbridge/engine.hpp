@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -73,6 +74,10 @@ public:
   bool set_pan(uint32_t id, float pan);
   bool set_master_gain(float gain);
 
+  bool set_source_vst3(uint32_t id, const std::string& module_path, std::string& error);
+  bool clear_source_effect(uint32_t id, std::string& error);
+  bool set_source_effect_bypass(uint32_t id, bool bypass, std::string& error);
+
   MeterSnapshot source_meter(uint32_t id);
   MeterSnapshot master_meter();
   MeterSnapshot broadcast_meter();
@@ -119,6 +124,7 @@ private:
   WasapiCaptureSource captures_[kMaxSources];
   WasapiRenderSink monitor_sink_;
   WasapiRenderSink live_sink_;
+  std::unique_ptr<RealtimeEffect> effects_[kMaxSources];
 
   MixGraph graph_;
   AtomicMeter master_meter_;
@@ -153,7 +159,7 @@ private:
   SpscFloatRing tap_ring_{1u << 18};  // ~2.7s stereo @ 48k
   SpscFloatRing live_ring_{1u << 16};  // broadcast → live sink
 
-  std::mutex control_mu_;
+  mutable std::mutex control_mu_;
 };
 
 }  // namespace mixbridge
