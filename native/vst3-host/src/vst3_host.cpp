@@ -34,8 +34,9 @@ bool ok(Steinberg::tresult r) {
 
 class ComponentHandler final : public Steinberg::Vst::IComponentHandler {
 public:
-  explicit ComponentHandler(Steinberg::Vst::ParameterChangeTransfer& transfer)
-      : transfer_(transfer) {}
+  ComponentHandler(Steinberg::Vst::ParameterChangeTransfer& transfer,
+                   std::atomic<bool>& dirty)
+      : transfer_(transfer), dirty_(dirty) {}
 
   Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
     return Steinberg::kResultOk;
@@ -44,6 +45,7 @@ public:
       Steinberg::Vst::ParamID id,
       Steinberg::Vst::ParamValue value) override {
     transfer_.addChange(id, value, 0);
+    dirty_.store(true, std::memory_order_release);
     return Steinberg::kResultOk;
   }
   Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
@@ -67,6 +69,7 @@ public:
 
 private:
   Steinberg::Vst::ParameterChangeTransfer& transfer_;
+  std::atomic<bool>& dirty_;
 };
 
 #ifdef _WIN32
@@ -178,7 +181,8 @@ struct Processor::Impl {
   Steinberg::Vst::ProcessContext process_context{};
   Steinberg::Vst::ParameterChanges input_changes{0};
   Steinberg::Vst::ParameterChangeTransfer ui_changes{0};
-  ComponentHandler component_handler{ui_changes};
+  std::atomic<bool> editor_state_dirty{false};
+  ComponentHandler component_handler{ui_changes, editor_state_dirty};
   std::thread editor_thread;
   std::atomic<bool> editor_is_open{false};
 #ifdef _WIN32
@@ -437,6 +441,7 @@ bool Processor::save_state(std::vector<uint8_t>& component_state,
       controller_state.assign(begin, begin + static_cast<size_t>(controller_stream.getSize()));
     }
   }
+  impl_->editor_state_dirty.store(false, std::memory_order_release);
   return true;
 }
 
@@ -607,6 +612,10 @@ void Processor::close_editor() noexcept {
 
 bool Processor::editor_open() const noexcept {
   return impl_->editor_is_open.load(std::memory_order_acquire);
+}
+
+bool Processor::editor_dirty() const noexcept {
+  return impl_->editor_state_dirty.load(std::memory_order_acquire);
 }
 
 bool Processor::process_rt(float* interleaved_stereo, uint32_t frames) noexcept {

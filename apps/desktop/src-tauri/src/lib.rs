@@ -61,6 +61,8 @@ struct SourceDto {
   effect_path: String,
   effect_bypass: bool,
   effect_faulted: bool,
+  effect_editor_open: bool,
+  effect_dirty: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -541,6 +543,8 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
     let broadcast = parse_field(&parts, "BROADCAST") != Some("0");
     let effect_bypass = parse_field(&parts, "FX_BYPASS") == Some("1");
     let effect_faulted = parse_field(&parts, "FX_FAULT") == Some("1");
+    let effect_editor_open = parse_field(&parts, "FX_EDITOR") == Some("1");
+    let effect_dirty = parse_field(&parts, "FX_DIRTY") == Some("1");
     let effect_name = if let Some(i) = parts.iter().position(|t| *t == "FX_NAME") {
       let end = parts.iter().enumerate().skip(i + 1)
         .find(|(_, t)| **t == "FX_PATH")
@@ -568,6 +572,8 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
         effect_path,
         effect_bypass,
         effect_faulted,
+        effect_editor_open,
+        effect_dirty,
       });
     }
   }

@@ -94,6 +94,8 @@ std::vector<SourceInfo> Engine::list_sources() const {
     if (auto* effect_ptr = slots_[i].effect.load(std::memory_order_acquire)) {
       info.effect_bypass = effect_ptr->bypass();
       info.effect_faulted = effect_ptr->faulted();
+      info.effect_editor_open = effect_ptr->editor_open();
+      info.effect_dirty = effect_ptr->editor_dirty();
     }
     out.push_back(std::move(info));
   }

@@ -31,6 +31,7 @@ public:
   bool open_editor(std::string& error);
   void close_editor() noexcept;
   bool editor_open() const noexcept;
+  bool editor_dirty() const noexcept;
   // Realtime entry point: no error-string construction, no allocation, no locks.
   bool process_rt(float* interleaved_stereo, uint32_t frames) noexcept;
 

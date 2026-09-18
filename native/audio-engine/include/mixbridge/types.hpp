@@ -92,6 +92,8 @@ struct SourceInfo {
   std::string effect_path;
   bool effect_bypass = false;
   bool effect_faulted = false;
+  bool effect_editor_open = false;
+  bool effect_dirty = false;
 };
 
 }  // namespace mixbridge

@@ -31,6 +31,7 @@ public:
   bool open_editor(std::string& error) override { return processor_.open_editor(error); }
   void close_editor() noexcept override { processor_.close_editor(); }
   bool editor_open() const noexcept override { return processor_.editor_open(); }
+  bool editor_dirty() const noexcept override { return processor_.editor_dirty(); }
 
   bool save_state_file(const std::string& path, std::string& error) override {
     std::vector<uint8_t> component;

@@ -14,7 +14,7 @@ const btnAdd = document.getElementById("btn-add");
 const picker = document.getElementById("picker");
 const pickerRoot = document.getElementById("picker-root");
 
-/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string}>} */
+/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string, effectEditorOpen?:boolean, effectDirty?:boolean}>} */
 const sources = new Map();
 
 let onAir = false;
@@ -411,6 +411,8 @@ function upsertSource(dto) {
     effectPath: dto.effect_path ?? dto.effectPath ?? previous.effectPath ?? "",
     effectBypass: dto.effect_bypass ?? dto.effectBypass ?? previous.effectBypass ?? false,
     effectFaulted: dto.effect_faulted ?? dto.effectFaulted ?? previous.effectFaulted ?? false,
+    effectEditorOpen: dto.effect_editor_open ?? dto.effectEditorOpen ?? previous.effectEditorOpen ?? false,
+    effectDirty: dto.effect_dirty ?? dto.effectDirty ?? previous.effectDirty ?? false,
     effectStateFile: dto.effectStateFile ?? previous.effectStateFile ?? "",
   });
 }
@@ -762,6 +764,34 @@ btnLive.addEventListener("click", async () => {
   }
 });
 
+let effectLifecycleBusy = false;
+async function refreshEffectLifecycle() {
+  if (effectLifecycleBusy) return;
+  effectLifecycleBusy = true;
+  try {
+    const list = await invoke("engine_list_sources");
+    for (const dto of list) {
+      const src = sources.get(dto.id);
+      if (!src) continue;
+      const wasDirty = !!src.effectDirty;
+      const wasOpen = !!src.effectEditorOpen;
+      upsertSource(dto);
+      const current = sources.get(dto.id);
+      if (current?.effectPath && current.effectDirty && !current.effectEditorOpen) {
+        await captureEffectState(current);
+        current.effectDirty = false;
+        scheduleSessionSave();
+      } else if (wasOpen !== !!current?.effectEditorOpen || wasDirty !== !!current?.effectDirty) {
+        renderSources();
+      }
+    }
+  } catch {
+    // Status loop owns visible engine errors; this maintenance pass stays quiet.
+  } finally {
+    effectLifecycleBusy = false;
+  }
+}
+
 async function refreshStatus() {
   try {
     await invoke("engine_ensure_running");
@@ -818,6 +848,7 @@ async function refreshStatus() {
     showError(String(e));
   }
   setInterval(refreshStatus, 100);
+  setInterval(refreshEffectLifecycle, 1000);
   setInterval(tryRestorePendingSources, 2000);
   refreshStatus();
 })();

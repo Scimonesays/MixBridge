@@ -150,10 +150,11 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       for (const auto& s : sources) {
         char buf[512];
         std::snprintf(buf, sizeof(buf),
-                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d PROCESS %u FX_BYPASS %d FX_FAULT %d",
+                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d PROCESS %u FX_BYPASS %d FX_FAULT %d FX_EDITOR %d FX_DIRTY %d",
                       s.id, source_kind_name(s.kind), s.name.c_str(), s.gain, s.mute ? 1 : 0,
                       s.monitor ? 1 : 0, s.broadcast ? 1 : 0, s.process_id,
-                      s.effect_bypass ? 1 : 0, s.effect_faulted ? 1 : 0);
+                      s.effect_bypass ? 1 : 0, s.effect_faulted ? 1 : 0,
+                      s.effect_editor_open ? 1 : 0, s.effect_dirty ? 1 : 0);
         std::string source_line(buf);
         source_line += " FX_NAME " + s.effect_name + " FX_PATH " + s.effect_path;
         write_line(pipe, source_line);
