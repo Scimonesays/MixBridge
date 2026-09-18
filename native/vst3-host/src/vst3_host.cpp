@@ -91,7 +91,7 @@ bool Processor::load(const std::string& module_path, std::string& error) {
   VST3::Hosting::ClassInfo selected;
   bool found = false;
   for (const auto& info : factory.classInfos()) {
-    if (info.category() == Steinberg::Vst::kVstAudioEffectClass) {
+    if (info.category() == kVstAudioEffectClass) {
       selected = info;
       found = true;
       break;
