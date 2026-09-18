@@ -18,6 +18,12 @@ struct StatusDto {
   state: String,
   broadcast: String,
   live_dest: bool,
+  frames: u64,
+  xruns: u64,
+  underruns: u64,
+  overruns: u64,
+  latency_ms: f32,
+  feedback: f32,
   raw: String,
 }
 
@@ -222,10 +228,34 @@ fn engine_status(app: tauri::AppHandle) -> Result<StatusDto, String> {
     .unwrap_or("standby")
     .to_string();
   let live_dest = parse_field(&parts, "LIVE_DEST") == Some("1");
+  let frames = parse_field(&parts, "FRAMES")
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0);
+  let xruns = parse_field(&parts, "XRUNS")
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0);
+  let underruns = parse_field(&parts, "UNDERRUNS")
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0);
+  let overruns = parse_field(&parts, "OVERRUNS")
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0);
+  let latency_ms = parse_field(&parts, "LAT_MS")
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0.0);
+  let feedback = parse_field(&parts, "FEEDBACK")
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0.0);
   Ok(StatusDto {
     state,
     broadcast,
     live_dest,
+    frames,
+    xruns,
+    underruns,
+    overruns,
+    latency_ms,
+    feedback,
     raw,
   })
 }
@@ -266,6 +296,25 @@ fn engine_stop(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
   } else {
     Err(raw)
+  }
+}
+
+#[tauri::command]
+fn engine_restart(app: tauri::AppHandle) -> Result<(), String> {
+  ensure_engine_process(&app)?;
+  let raw = match pipe_command("RESTART") {
+    Ok(v) if v.starts_with("OK") => v,
+    _ => {
+      force_respawn(&app)?;
+      pipe_command("RESTART").unwrap_or_else(|_| "OK".into())
+    }
+  };
+  if raw.starts_with("OK") || raw == "OK" {
+    let _ = pipe_command("START");
+    Ok(())
+  } else {
+    force_respawn(&app)?;
+    ensure_running(&app)
   }
 }
 
@@ -670,6 +719,7 @@ pub fn run() {
       engine_meter_source,
       engine_start,
       engine_stop,
+      engine_restart,
       broadcast_enable,
       broadcast_disable,
       engine_list_capture,

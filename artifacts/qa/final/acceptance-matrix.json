@@ -1,16 +1,36 @@
 {
-  "date": "2026-09-18T00:15:00Z",
+  "date": "2026-09-18T00:30:00Z",
   "machine": "Windows 11 + RME Fireface UC",
   "gates": {
     "A_build": "PASS",
     "B_install": "PARTIAL",
     "C_launch": "PASS",
+    "D_input": "PASS",
+    "E_app_capture": "PASS",
+    "F_mix": "PASS",
+    "G_monitor": "PASS",
+    "H_vst3": "PASS",
     "I_builtin_instrument": "PASS",
+    "J_midi": "PARTIAL",
     "K_virtual_output": "PARTIAL",
+    "L_discord": "NOT_RUN",
+    "M_standby": "PASS",
+    "N_go_live": "PASS",
     "O_presets": "PASS",
+    "P_hotplug": "PARTIAL",
+    "Q_plugin_failure": "PARTIAL",
+    "R_audio_analysis": "PASS",
+    "S_soak": "PASS",
+    "T_memory": "PASS",
+    "U_latency": "PASS",
+    "V_offline": "PASS",
     "W_ux": "PASS",
+    "X_accessibility": "PARTIAL",
     "Y_screenshots": "NOT_RUN",
-    "AA_uninstall": "NOT_RUN"
+    "Z_screenshot_quality": "NOT_RUN",
+    "AA_uninstall": "NOT_RUN",
+    "AB_license": "PARTIAL",
+    "AC_docs": "PARTIAL"
   },
   "artifacts": {
     "desktop_exe": "apps/desktop/src-tauri/target/release/mixbridge-desktop.exe",
@@ -19,12 +39,15 @@
   },
   "notes": {
     "H_vst3": "Guitar Rig 6 process + engine FX path proven",
-    "K_virtual_output": "6.1 WASAPI live dest PASS; first-party MixBridge Output blocked on WindowsKernelModeDriver10.0 toolset",
+    "K_virtual_output": "6.1 WASAPI live dest PASS; first-party MixBridge Output blocked on WindowsKernelModeDriver10.0 toolset (WDK installed; VS extension install in progress)",
     "O_presets": "Discord Jam save/load wired; timing via console preset_restore_ms",
-    "B_install": "Release exe built; MSI/NSIS bundle not configured yet"
+    "B_install": "Release exe built; NSIS bundle enabling in progress",
+    "L_discord": "No VB-CABLE/MixBridge Output on machine yet; Live render endpoints are RME + NVIDIA only",
+    "J_midi": "Spec + host hooks planned; MIDI event injection not product-complete"
   },
   "external_blockers": [
-    "WindowsKernelModeDriver10.0 platform toolset not installed on VS Build Tools (WDK headers present)",
-    "Production EV code signing certificate not available"
+    "WindowsKernelModeDriver10.0 platform toolset (installing VS WDK component)",
+    "Production EV code signing certificate not available",
+    "No virtual cable endpoint present for Discord mic path until driver or external cable"
   ]
 }

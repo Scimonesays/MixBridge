@@ -75,6 +75,31 @@ EngineDiagnostics Engine::diagnostics() const {
     d.estimated_latency_ms =
       1000.0 * static_cast<double>(d.buffer_frames) / static_cast<double>(d.device_rate);
   }
+  // Feedback risk: live render endpoint matches monitor or a physical capture source.
+  float risk = 0.0f;
+  if (!live_device_id_.empty()) {
+    if (!monitor_device_id_.empty() && live_device_id_ == monitor_device_id_) risk = 1.0f;
+    for (uint32_t i = 0; i < kMaxSources; ++i) {
+      if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
+      const auto kind = static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed));
+      if (kind == SourceKind::PhysicalCapture && !slots_[i].device_id.empty() &&
+          slots_[i].device_id == live_device_id_) {
+        risk = 1.0f;
+        break;
+      }
+    }
+    // Same-device family heuristic: Speakers/Headphones as live while monitoring same card is risky when capturing.
+    if (risk < 1.0f && broadcast_state() == BroadcastState::Live) {
+      for (uint32_t i = 0; i < kMaxSources; ++i) {
+        if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
+        if (static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed)) ==
+            SourceKind::PhysicalCapture) {
+          risk = (std::max)(risk, 0.35f);
+        }
+      }
+    }
+  }
+  d.feedback_risk = risk;
   return d;
 }
 

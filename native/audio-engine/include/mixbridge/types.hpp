@@ -77,6 +77,7 @@ struct EngineDiagnostics {
   uint32_t device_rate = 0;
   uint32_t engine_rate = kEngineRate;
   double estimated_latency_ms = 0.0;
+  float feedback_risk = 0.0f;
 };
 
 struct SourceInfo {

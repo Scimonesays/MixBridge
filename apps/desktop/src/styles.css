@@ -218,6 +218,39 @@ html, body {
   animation: air-pulse 1.2s ease-in-out infinite;
 }
 
+.diag-panel { min-width: min(420px, 92vw); }
+.diag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+.diag-cell {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  background: rgba(8, 10, 14, 0.5);
+  border: 1px solid rgba(59, 184, 239, 0.1);
+}
+.diag-cell.wide { grid-column: 1 / -1; }
+.diag-k {
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.diag-v {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.diag-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
 .identity.fx-label {
   color: var(--violet);
   font-size: 0.62rem;

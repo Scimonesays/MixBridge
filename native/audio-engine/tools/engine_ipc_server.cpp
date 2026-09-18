@@ -228,14 +228,14 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe
       write_line(pipe, "OK PONG");
     } else if (cmd == "STATUS") {
       const auto d = engine.diagnostics();
-      char buf[420];
+      char buf[480];
       std::snprintf(
         buf, sizeof(buf),
-        "OK STATE %s BROADCAST %s LIVE_DEST %d FRAMES %llu XRUNS %llu UNDERRUNS %llu OVERRUNS %llu LAT_MS %.2f",
+        "OK STATE %s BROADCAST %s LIVE_DEST %d FRAMES %llu XRUNS %llu UNDERRUNS %llu OVERRUNS %llu LAT_MS %.2f FEEDBACK %.3f",
         mixbridge::engine_state_name(d.state), mixbridge::broadcast_state_name(d.broadcast),
         d.live_destination_ready ? 1 : 0, static_cast<unsigned long long>(d.frames_rendered),
         static_cast<unsigned long long>(d.xruns), static_cast<unsigned long long>(d.underruns),
-        static_cast<unsigned long long>(d.overruns), d.estimated_latency_ms);
+        static_cast<unsigned long long>(d.overruns), d.estimated_latency_ms, d.feedback_risk);
       write_line(pipe, buf);
     } else if (cmd == "LIST_CAPTURE") {
       auto devices = engine.list_capture_devices();

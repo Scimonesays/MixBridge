@@ -638,6 +638,55 @@ picker.addEventListener("click", (ev) => {
   if (ev.target === picker) closePicker();
 });
 
+const diag = document.getElementById("diag");
+const btnDiag = document.getElementById("btn-diag");
+let lastStatus = null;
+
+function formatFeedback(v) {
+  const n = Number(v) || 0;
+  if (n >= 0.9) return "high";
+  if (n >= 0.3) return "watch";
+  return "clear";
+}
+
+function refreshDiagPanel(s) {
+  if (!diag || !s) return;
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+  set("diag-state", s.state || "—");
+  set("diag-bcast", s.broadcast || "—");
+  set("diag-live", s.live_dest ? (liveDestName || "ready") : "none");
+  set("diag-lat", typeof s.latency_ms === "number" ? `${s.latency_ms.toFixed(1)} ms` : "—");
+  set("diag-xruns", String(s.xruns ?? "—"));
+  set("diag-under", String(s.underruns ?? "—"));
+  set("diag-over", String(s.overruns ?? "—"));
+  set("diag-frames", String(s.frames ?? "—"));
+  set("diag-fb", formatFeedback(s.feedback));
+}
+
+if (btnDiag && diag) {
+  btnDiag.addEventListener("click", () => {
+    refreshDiagPanel(lastStatus);
+    diag.showModal();
+  });
+  document.getElementById("diag-close")?.addEventListener("click", () => diag.close());
+  document.getElementById("diag-restart")?.addEventListener("click", async () => {
+    try {
+      await invoke("engine_restart");
+      showError("");
+      await refreshStatus();
+      refreshDiagPanel(lastStatus);
+    } catch (e) {
+      showError(String(e));
+    }
+  });
+  diag.addEventListener("click", (ev) => {
+    if (ev.target === diag) diag.close();
+  });
+}
+
 btnLive.addEventListener("click", async () => {
   try {
     if (onAir) {
@@ -682,11 +731,13 @@ async function refreshStatus() {
   try {
     await invoke("engine_ensure_running");
     const s = await invoke("engine_status");
+    lastStatus = s;
     engineOnline = true;
     liveDestReady = !!s.live_dest;
     // On Air only when broadcast is live AND a real destination exists.
     const live = liveDestReady && (s.broadcast || "").toLowerCase() === "live";
     setAirVisual(live);
+    if (diag?.open) refreshDiagPanel(s);
 
     const m = await invoke("engine_meter");
     const pct = setMeterVertical(meterEl, m.peak);
