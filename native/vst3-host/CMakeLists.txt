@@ -48,6 +48,9 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
     PUBLIC include
     PRIVATE "${MIXBRIDGE_VST3_SDK}")
   target_link_libraries(mixbridge_vst3_host PRIVATE sdk_hosting)
+  if(WIN32)
+    target_link_libraries(mixbridge_vst3_host PRIVATE ole32 user32)
+  endif()
 
   add_executable(mb-vst3-probe tools/vst3_probe_main.cpp)
   target_link_libraries(mb-vst3-probe PRIVATE mixbridge_vst3_host)
