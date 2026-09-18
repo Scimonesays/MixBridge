@@ -292,6 +292,27 @@ fn broadcast_disable(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn engine_list_capture(app: tauri::AppHandle) -> Result<Vec<DeviceDto>, String> {
+  ensure_engine_process(&app)?;
+  let lines = pipe_command_until_end("LIST_CAPTURE")?;
+  let mut out = Vec::new();
+  for line in lines {
+    if !line.starts_with("DEVICE ") {
+      continue;
+    }
+    if let Some(rest) = line.strip_prefix("DEVICE ID ") {
+      if let Some((id, name)) = rest.split_once(" NAME ") {
+        out.push(DeviceDto {
+          id: id.to_string(),
+          name: name.to_string(),
+        });
+      }
+    }
+  }
+  Ok(out)
+}
+
+#[tauri::command]
 fn engine_list_render(app: tauri::AppHandle) -> Result<Vec<DeviceDto>, String> {
   ensure_engine_process(&app)?;
   let lines = pipe_command_until_end("LIST_RENDER")?;

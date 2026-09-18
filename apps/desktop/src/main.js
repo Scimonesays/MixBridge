@@ -320,6 +320,7 @@ async function showInstrumentList() {
   pickerRoot.querySelector(".pick-back").addEventListener("click", openPickerRoot);
   const instruments = [
     { name: "Bass", hz: 110 },
+    { name: "Keys", hz: 261.63 },
     { name: "Pad", hz: 220 },
     { name: "Click", hz: 880 },
   ];

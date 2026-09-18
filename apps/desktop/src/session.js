@@ -1,4 +1,4 @@
-# Session persistence helpers (loaded by main.js)
+// Session persistence helpers (loaded by main.js)
 
 export function presetDirHint() {
   return "LOCALAPPDATA/MixBridge/presets";

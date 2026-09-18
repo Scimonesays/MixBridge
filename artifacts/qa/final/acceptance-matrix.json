@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-18T00:15:00Z",
+  "machine": "Windows 11 + RME Fireface UC",
+  "gates": {
+    "A_build": "PASS",
+    "B_install": "PARTIAL",
+    "C_launch": "PASS",
+    "I_builtin_instrument": "PASS",
+    "K_virtual_output": "PARTIAL",
+    "O_presets": "PASS",
+    "W_ux": "PASS",
+    "Y_screenshots": "NOT_RUN",
+    "AA_uninstall": "NOT_RUN"
+  },
+  "artifacts": {
+    "desktop_exe": "apps/desktop/src-tauri/target/release/mixbridge-desktop.exe",
+    "phase5_fx": "scripts/prove-phase5-fx.ps1 PASS",
+    "dual_source_gr": "scripts/prove-dual-source-gr.ps1 PASS"
+  },
+  "notes": {
+    "H_vst3": "Guitar Rig 6 process + engine FX path proven",
+    "K_virtual_output": "6.1 WASAPI live dest PASS; first-party MixBridge Output blocked on WindowsKernelModeDriver10.0 toolset",
+    "O_presets": "Discord Jam save/load wired; timing via console preset_restore_ms",
+    "B_install": "Release exe built; MSI/NSIS bundle not configured yet"
+  },
+  "external_blockers": [
+    "WindowsKernelModeDriver10.0 platform toolset not installed on VS Build Tools (WDK headers present)",
+    "Production EV code signing certificate not available"
+  ]
+}
