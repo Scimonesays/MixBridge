@@ -68,6 +68,10 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
       "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/utility/test/rttransfertest.cpp"
     )
     target_link_libraries(mixbridge-vst3-fixture PRIVATE sdk sdk_hosting)
+    if(WIN32)
+      target_sources(mixbridge-vst3-fixture PRIVATE
+        "${MIXBRIDGE_VST3_SDK}/public.sdk/source/main/dllmain.cpp")
+    endif()
     target_compile_features(mixbridge-vst3-fixture PUBLIC cxx_std_17)
     smtg_target_configure_version_file(mixbridge-vst3-fixture)
   endif()
