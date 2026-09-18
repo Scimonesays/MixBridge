@@ -37,6 +37,15 @@ int main() {
   if (err != "no_live_destination") return fail("expected no_live_destination");
   if (engine.broadcast_state() != mixbridge::BroadcastState::Standby) return fail("broadcast not standby");
 
+  // Hosted CI runners may have no render endpoint at all. Keep the hardware-free
+  // state/source assertions in CI; the RME acceptance harness owns the real
+  // monitor + live transition proof.
+  if (engine.list_render_devices().empty()) {
+    engine.shutdown();
+    std::printf("phase41_state_remove_result=PASS hardware_live=SKIP_no_render_endpoint\n");
+    return 0;
+  }
+
   engine.set_live_destination_ready(true);
   // Still needs running/starting engine
   if (engine.enable_broadcast(err)) return fail("enable without running should fail");
