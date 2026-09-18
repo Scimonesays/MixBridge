@@ -33,6 +33,12 @@ bool ok(Steinberg::tresult r) {
   return r == Steinberg::kResultOk || r == Steinberg::kResultTrue;
 }
 
+bool processing_transition_ok(Steinberg::tresult r) {
+  // VST3 AudioEffect's default setProcessing implementation returns
+  // kNotImplemented. Steinberg's own validator treats that as non-fatal.
+  return ok(r) || r == Steinberg::kNotImplemented;
+}
+
 class ComponentHandler final : public Steinberg::Vst::IComponentHandler {
 public:
   ComponentHandler(Steinberg::Vst::ParameterChangeTransfer& transfer,
@@ -377,7 +383,7 @@ bool Processor::prepare(double sample_rate, uint32_t max_block_frames, std::stri
     impl_->process_data.unprepare();
     return false;
   }
-  if (!ok(impl_->processor->setProcessing(true))) {
+  if (!processing_transition_ok(impl_->processor->setProcessing(true))) {
     impl_->component->setActive(false);
     impl_->process_data.unprepare();
     error = "vst3_set_processing_failed";
@@ -467,7 +473,7 @@ bool Processor::load_state(const std::vector<uint8_t>& component_state,
       impl_->is_prepared = false;
       return false;
     }
-    if (!ok(impl_->processor->setProcessing(true))) {
+    if (!processing_transition_ok(impl_->processor->setProcessing(true))) {
       impl_->component->setActive(false);
       error = "vst3_state_processing_resume_failed";
       impl_->is_prepared = false;
