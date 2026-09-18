@@ -7,6 +7,7 @@
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/vst/ivstprocesscontext.h"
 
 #include <algorithm>
 #include <atomic>
@@ -23,7 +24,7 @@ bool ok(Steinberg::tresult r) {
 }  // namespace
 
 struct Processor::Impl {
-  Steinberg::Vst::VST3::Hosting::Module::Ptr module;
+  VST3::Hosting::Module::Ptr module;
   Steinberg::IPtr<Steinberg::Vst::PlugProvider> provider;
   Steinberg::IPtr<Steinberg::Vst::IComponent> component;
   Steinberg::Vst::IAudioProcessor* processor = nullptr;
@@ -80,14 +81,14 @@ bool Processor::load(const std::string& module_path, std::string& error) {
     return false;
   }
 
-  auto module = Steinberg::Vst::VST3::Hosting::Module::create(module_path, error);
+  auto module = VST3::Hosting::Module::create(module_path, error);
   if (!module) {
     if (error.empty()) error = "vst3_module_load_failed";
     return false;
   }
 
   auto factory = module->getFactory();
-  Steinberg::Vst::VST3::Hosting::ClassInfo selected;
+  VST3::Hosting::ClassInfo selected;
   bool found = false;
   for (const auto& info : factory.classInfos()) {
     if (info.category() == Steinberg::Vst::kVstAudioEffectClass) {
@@ -127,8 +128,8 @@ bool Processor::load(const std::string& module_path, std::string& error) {
   }
 
   impl_->module = std::move(module);
-  impl_->provider = std::move(provider);
-  impl_->component = std::move(component);
+  impl_->provider = provider;
+  impl_->component = component;
   impl_->processor = processor;
   impl_->module_path = module_path;
   impl_->plugin_name = selected.name();
