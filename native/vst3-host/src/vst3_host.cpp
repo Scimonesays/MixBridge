@@ -5,16 +5,25 @@
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/plugprovider.h"
 #include "public.sdk/source/vst/hosting/processdata.h"
+#include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
+#include "pluginterfaces/gui/iplugview.h"
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
+#include <thread>
 #include <utility>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace mixbridge::vst3 {
 namespace {
@@ -22,6 +31,139 @@ namespace {
 bool ok(Steinberg::tresult r) {
   return r == Steinberg::kResultOk || r == Steinberg::kResultTrue;
 }
+
+class ComponentHandler final : public Steinberg::Vst::IComponentHandler {
+public:
+  explicit ComponentHandler(Steinberg::Vst::ParameterChangeTransfer& transfer)
+      : transfer_(transfer) {}
+
+  Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
+    return Steinberg::kResultOk;
+  }
+  Steinberg::tresult PLUGIN_API performEdit(
+      Steinberg::Vst::ParamID id,
+      Steinberg::Vst::ParamValue value) override {
+    transfer_.addChange(id, value, 0);
+    return Steinberg::kResultOk;
+  }
+  Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
+    return Steinberg::kResultOk;
+  }
+  Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override {
+    return Steinberg::kResultOk;
+  }
+  Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+    if (!obj) return Steinberg::kInvalidArgument;
+    *obj = nullptr;
+    if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
+        Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+      *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+      return Steinberg::kResultTrue;
+    }
+    return Steinberg::kNoInterface;
+  }
+  Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+  Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+
+private:
+  Steinberg::Vst::ParameterChangeTransfer& transfer_;
+};
+
+#ifdef _WIN32
+std::wstring editor_title_wide(const std::string& value) {
+  if (value.empty()) return L"MixBridge VST3";
+  const int count = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
+  if (count <= 0) return L"MixBridge VST3";
+  std::wstring out(static_cast<size_t>(count), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), out.data(), count);
+  return out;
+}
+
+class EditorFrame final : public Steinberg::IPlugFrame {
+public:
+  Steinberg::IPtr<Steinberg::IPlugView> view;
+  HWND hwnd = nullptr;
+  std::atomic<bool>* open_flag = nullptr;
+
+  Steinberg::tresult PLUGIN_API resizeView(
+      Steinberg::IPlugView* candidate, Steinberg::ViewRect* size) override {
+    if (!hwnd || !candidate || candidate != view.get() || !size)
+      return Steinberg::kInvalidArgument;
+    RECT wr{0, 0, size->right - size->left, size->bottom - size->top};
+    const auto style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
+    const auto exstyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+    AdjustWindowRectEx(&wr, style, FALSE, exstyle);
+    SetWindowPos(hwnd, nullptr, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    candidate->onSize(size);
+    return Steinberg::kResultTrue;
+  }
+  Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+    if (!obj) return Steinberg::kInvalidArgument;
+    *obj = nullptr;
+    if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::IPlugFrame::iid) ||
+        Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+      *obj = static_cast<Steinberg::IPlugFrame*>(this);
+      return Steinberg::kResultTrue;
+    }
+    return Steinberg::kNoInterface;
+  }
+  Steinberg::uint32 PLUGIN_API addRef() override { return 1000; }
+  Steinberg::uint32 PLUGIN_API release() override { return 1000; }
+};
+
+LRESULT CALLBACK mixbridge_editor_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+  auto* frame = reinterpret_cast<EditorFrame*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  if (message == WM_NCCREATE) {
+    const auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+    frame = static_cast<EditorFrame*>(cs->lpCreateParams);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(frame));
+    if (frame) frame->hwnd = hwnd;
+  }
+  if (!frame) return DefWindowProcW(hwnd, message, wParam, lParam);
+  switch (message) {
+    case WM_ERASEBKGND: return 1;
+    case WM_SIZE:
+      if (frame->view) {
+        Steinberg::ViewRect size{};
+        size.right = LOWORD(lParam);
+        size.bottom = HIWORD(lParam);
+        frame->view->onSize(&size);
+      }
+      return 0;
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      return 0;
+    case WM_DESTROY:
+      if (frame->view) {
+        frame->view->setFrame(nullptr);
+        frame->view->removed();
+        frame->view = nullptr;
+      }
+      if (frame->open_flag) frame->open_flag->store(false, std::memory_order_release);
+      PostQuitMessage(0);
+      return 0;
+    default:
+      return DefWindowProcW(hwnd, message, wParam, lParam);
+  }
+}
+
+bool register_mixbridge_editor_class(HINSTANCE instance) {
+  static std::once_flag once;
+  static bool result = false;
+  std::call_once(once, [&] {
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_DBLCLKS;
+    wc.lpfnWndProc = mixbridge_editor_proc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.lpszClassName = L"MixBridgeVST3Editor";
+    result = RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+  });
+  return result;
+}
+#endif
 
 }  // namespace
 
@@ -34,6 +176,14 @@ struct Processor::Impl {
   Steinberg::IPtr<Steinberg::Vst::HostApplication> host_context;
   Steinberg::Vst::HostProcessData process_data;
   Steinberg::Vst::ProcessContext process_context{};
+  Steinberg::Vst::ParameterChanges input_changes{0};
+  Steinberg::Vst::ParameterChangeTransfer ui_changes{0};
+  ComponentHandler component_handler{ui_changes};
+  std::thread editor_thread;
+  std::atomic<bool> editor_is_open{false};
+#ifdef _WIN32
+  std::atomic<HWND> editor_hwnd{nullptr};
+#endif
 
   std::string module_path;
   std::string plugin_name;
@@ -56,13 +206,27 @@ struct Processor::Impl {
     continuous_samples = 0;
   }
 
+  void close_editor() noexcept {
+#ifdef _WIN32
+    if (auto hwnd = editor_hwnd.load(std::memory_order_acquire))
+      PostMessageW(hwnd, WM_CLOSE, 0, 0);
+#endif
+    if (editor_thread.joinable()) editor_thread.join();
+#ifdef _WIN32
+    editor_hwnd.store(nullptr, std::memory_order_release);
+#endif
+    editor_is_open.store(false, std::memory_order_release);
+  }
+
   void reset() {
+    close_editor();
     deactivate();
     if (processor) {
       processor->release();
       processor = nullptr;
     }
     component = nullptr;
+    if (controller) controller->setComponentHandler(nullptr);
     controller = nullptr;
     provider = nullptr;
     module = nullptr;
@@ -137,6 +301,13 @@ bool Processor::load(const std::string& module_path, std::string& error) {
   impl_->provider = provider;
   impl_->component = component;
   impl_->controller = provider->getControllerPtr();
+  if (impl_->controller) {
+    const auto parameter_count =
+      std::max<Steinberg::int32>(16, impl_->controller->getParameterCount());
+    impl_->input_changes.setMaxParameters(parameter_count);
+    impl_->ui_changes.setMaxParameters(parameter_count);
+    impl_->controller->setComponentHandler(&impl_->component_handler);
+  }
   impl_->processor = processor;
   impl_->module_path = module_path;
   impl_->plugin_name = selected.name();
@@ -334,6 +505,110 @@ bool Processor::load_state(const std::vector<uint8_t>& component_state,
   return reactivate();
 }
 
+bool Processor::open_editor(std::string& error) {
+#ifndef _WIN32
+  error = "vst3_editor_windows_only";
+  return false;
+#else
+  if (!impl_->controller) {
+    error = "vst3_editor_controller_missing";
+    return false;
+  }
+  if (impl_->editor_is_open.load(std::memory_order_acquire)) {
+    if (auto hwnd = impl_->editor_hwnd.load(std::memory_order_acquire)) {
+      ShowWindow(hwnd, SW_RESTORE);
+      SetForegroundWindow(hwnd);
+    }
+    return true;
+  }
+  if (impl_->editor_thread.joinable()) impl_->editor_thread.join();
+
+  auto* controller = impl_->controller.get();
+  controller->addRef();
+  const auto title = impl_->plugin_name.empty()
+    ? std::string("MixBridge VST3")
+    : impl_->plugin_name + " — MixBridge";
+  impl_->editor_is_open.store(true, std::memory_order_release);
+
+  impl_->editor_thread = std::thread([this, controller, title] {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    auto view = Steinberg::owned(controller->createView(Steinberg::Vst::ViewType::kEditor));
+    if (!view ||
+        view->isPlatformTypeSupported(Steinberg::kPlatformTypeHWND) != Steinberg::kResultTrue) {
+      impl_->editor_is_open.store(false, std::memory_order_release);
+      controller->release();
+      CoUninitialize();
+      return;
+    }
+    Steinberg::ViewRect vr{};
+    if (view->getSize(&vr) != Steinberg::kResultTrue) {
+      impl_->editor_is_open.store(false, std::memory_order_release);
+      controller->release();
+      CoUninitialize();
+      return;
+    }
+
+    const auto instance = GetModuleHandleW(nullptr);
+    if (!register_mixbridge_editor_class(instance)) {
+      impl_->editor_is_open.store(false, std::memory_order_release);
+      controller->release();
+      CoUninitialize();
+      return;
+    }
+
+    EditorFrame frame;
+    frame.view = view;
+    frame.open_flag = &impl_->editor_is_open;
+
+    DWORD style = WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+    if (view->canResize() == Steinberg::kResultTrue) style |= WS_SIZEBOX | WS_MAXIMIZEBOX;
+    RECT wr{0, 0, vr.right - vr.left, vr.bottom - vr.top};
+    AdjustWindowRectEx(&wr, style, FALSE, WS_EX_APPWINDOW);
+    const auto wtitle = editor_title_wide(title);
+    const auto hwnd = CreateWindowExW(
+      WS_EX_APPWINDOW, L"MixBridgeVST3Editor", wtitle.c_str(), style,
+      CW_USEDEFAULT, CW_USEDEFAULT, wr.right - wr.left, wr.bottom - wr.top,
+      nullptr, nullptr, instance, &frame);
+    if (!hwnd) {
+      impl_->editor_is_open.store(false, std::memory_order_release);
+      controller->release();
+      CoUninitialize();
+      return;
+    }
+    impl_->editor_hwnd.store(hwnd, std::memory_order_release);
+    view->setFrame(&frame);
+    if (view->attached(hwnd, Steinberg::kPlatformTypeHWND) != Steinberg::kResultTrue) {
+      DestroyWindow(hwnd);
+      impl_->editor_hwnd.store(nullptr, std::memory_order_release);
+      impl_->editor_is_open.store(false, std::memory_order_release);
+      controller->release();
+      CoUninitialize();
+      return;
+    }
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+    impl_->editor_hwnd.store(nullptr, std::memory_order_release);
+    impl_->editor_is_open.store(false, std::memory_order_release);
+    controller->release();
+    CoUninitialize();
+  });
+  return true;
+#endif
+}
+
+void Processor::close_editor() noexcept {
+  impl_->close_editor();
+}
+
+bool Processor::editor_open() const noexcept {
+  return impl_->editor_is_open.load(std::memory_order_acquire);
+}
+
 bool Processor::process_rt(float* interleaved_stereo, uint32_t frames) noexcept {
   if (!impl_->is_prepared || !impl_->processor || !interleaved_stereo ||
       frames == 0 || frames > impl_->max_block) {
@@ -368,6 +643,10 @@ bool Processor::process_rt(float* interleaved_stereo, uint32_t frames) noexcept 
 
     impl_->process_data.numSamples = static_cast<Steinberg::int32>(frames);
     impl_->process_context.continousTimeSamples = impl_->continuous_samples;
+    impl_->input_changes.clearQueue();
+    impl_->ui_changes.transferChangesTo(impl_->input_changes);
+    impl_->process_data.inputParameterChanges =
+      impl_->input_changes.getParameterCount() > 0 ? &impl_->input_changes : nullptr;
 
     if (!ok(impl_->processor->process(impl_->process_data))) {
       impl_->faulted.store(true, std::memory_order_release);
