@@ -1,5 +1,6 @@
 #include "mixbridge/vst3_host.hpp"
 
+#include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/plugprovider.h"
@@ -7,6 +8,7 @@
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 
 #include <algorithm>
@@ -27,6 +29,7 @@ struct Processor::Impl {
   VST3::Hosting::Module::Ptr module;
   Steinberg::IPtr<Steinberg::Vst::PlugProvider> provider;
   Steinberg::IPtr<Steinberg::Vst::IComponent> component;
+  Steinberg::IPtr<Steinberg::Vst::IEditController> controller;
   Steinberg::Vst::IAudioProcessor* processor = nullptr;
   Steinberg::IPtr<Steinberg::Vst::HostApplication> host_context;
   Steinberg::Vst::HostProcessData process_data;
@@ -60,6 +63,7 @@ struct Processor::Impl {
       processor = nullptr;
     }
     component = nullptr;
+    controller = nullptr;
     provider = nullptr;
     module = nullptr;
     host_context = nullptr;
@@ -132,6 +136,7 @@ bool Processor::load(const std::string& module_path, std::string& error) {
   impl_->module = std::move(module);
   impl_->provider = provider;
   impl_->component = component;
+  impl_->controller = provider->getControllerPtr();
   impl_->processor = processor;
   impl_->module_path = module_path;
   impl_->plugin_name = selected.name();
@@ -230,6 +235,103 @@ bool Processor::process(float* interleaved_stereo, uint32_t frames, std::string&
     return false;
   }
   return true;
+}
+
+
+bool Processor::save_state(std::vector<uint8_t>& component_state,
+                           std::vector<uint8_t>& controller_state,
+                           std::string& error) {
+  component_state.clear();
+  controller_state.clear();
+  if (!loaded()) {
+    error = "vst3_not_loaded";
+    return false;
+  }
+
+  Steinberg::MemoryStream component_stream;
+  if (!ok(impl_->component->getState(&component_stream))) {
+    error = "vst3_component_get_state_failed";
+    return false;
+  }
+  if (component_stream.getSize() > 0 && component_stream.getData()) {
+    const auto* begin = reinterpret_cast<const uint8_t*>(component_stream.getData());
+    component_state.assign(begin, begin + static_cast<size_t>(component_stream.getSize()));
+  }
+
+  if (impl_->controller) {
+    Steinberg::MemoryStream controller_stream;
+    if (ok(impl_->controller->getState(&controller_stream)) &&
+        controller_stream.getSize() > 0 && controller_stream.getData()) {
+      const auto* begin = reinterpret_cast<const uint8_t*>(controller_stream.getData());
+      controller_state.assign(begin, begin + static_cast<size_t>(controller_stream.getSize()));
+    }
+  }
+  return true;
+}
+
+bool Processor::load_state(const std::vector<uint8_t>& component_state,
+                           const std::vector<uint8_t>& controller_state,
+                           std::string& error) {
+  if (!loaded()) {
+    error = "vst3_not_loaded";
+    return false;
+  }
+
+  const bool was_prepared = impl_->is_prepared;
+  if (was_prepared) {
+    impl_->processor->setProcessing(false);
+    impl_->component->setActive(false);
+  }
+
+  auto reactivate = [&]() -> bool {
+    if (!was_prepared) return true;
+    if (!ok(impl_->component->setActive(true))) {
+      error = "vst3_state_reactivate_failed";
+      impl_->is_prepared = false;
+      return false;
+    }
+    if (!ok(impl_->processor->setProcessing(true))) {
+      impl_->component->setActive(false);
+      error = "vst3_state_processing_resume_failed";
+      impl_->is_prepared = false;
+      return false;
+    }
+    impl_->is_prepared = true;
+    return true;
+  };
+
+  if (!component_state.empty()) {
+    Steinberg::MemoryStream component_stream(
+      const_cast<uint8_t*>(component_state.data()),
+      static_cast<Steinberg::TSize>(component_state.size()));
+    if (!ok(impl_->component->setState(&component_stream))) {
+      error = "vst3_component_set_state_failed";
+      reactivate();
+      return false;
+    }
+
+    if (impl_->controller) {
+      component_stream.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
+      if (!ok(impl_->controller->setComponentState(&component_stream))) {
+        error = "vst3_controller_component_state_failed";
+        reactivate();
+        return false;
+      }
+    }
+  }
+
+  if (impl_->controller && !controller_state.empty()) {
+    Steinberg::MemoryStream controller_stream(
+      const_cast<uint8_t*>(controller_state.data()),
+      static_cast<Steinberg::TSize>(controller_state.size()));
+    if (!ok(impl_->controller->setState(&controller_stream))) {
+      error = "vst3_controller_set_state_failed";
+      reactivate();
+      return false;
+    }
+  }
+
+  return reactivate();
 }
 
 bool Processor::process_rt(float* interleaved_stereo, uint32_t frames) noexcept {

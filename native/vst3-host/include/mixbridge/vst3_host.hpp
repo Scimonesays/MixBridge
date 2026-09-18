@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace mixbridge::vst3 {
 
@@ -21,6 +22,12 @@ public:
 
   bool prepare(double sample_rate, uint32_t max_block_frames, std::string& error);
   bool process(float* interleaved_stereo, uint32_t frames, std::string& error);
+  bool save_state(std::vector<uint8_t>& component_state,
+                  std::vector<uint8_t>& controller_state,
+                  std::string& error);
+  bool load_state(const std::vector<uint8_t>& component_state,
+                  const std::vector<uint8_t>& controller_state,
+                  std::string& error);
   // Realtime entry point: no error-string construction, no allocation, no locks.
   bool process_rt(float* interleaved_stereo, uint32_t frames) noexcept;
 

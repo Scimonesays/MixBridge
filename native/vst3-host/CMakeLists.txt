@@ -28,6 +28,7 @@ if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
 
   add_library(mixbridge_vst3_host STATIC
     src/vst3_host.cpp
+    "${MIXBRIDGE_VST3_SDK}/public.sdk/source/common/memorystream.cpp"
     "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/plugprovider.cpp"
   )
   if(WIN32)
