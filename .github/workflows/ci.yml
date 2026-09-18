@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   probes:
     runs-on: windows-latest
@@ -12,7 +16,7 @@ jobs:
       - name: Configure probes
         shell: pwsh
         run: |
-          cmake -S native/probes -B native/probes/build -G "Visual Studio 17 2022" -A x64
+          cmake -S native/probes -B native/probes/build
       - name: Build probes
         shell: pwsh
         run: cmake --build native/probes/build --config Release
@@ -20,10 +24,13 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir native/probes/build -C Release --output-on-failure
+      - name: Fetch pinned VST3 SDK
+        shell: pwsh
+        run: powershell -File scripts/fetch-vst3sdk.ps1
       - name: Configure engine
         shell: pwsh
         run: |
-          cmake -S native/audio-engine -B native/audio-engine/build -G "Visual Studio 17 2022" -A x64
+          cmake -S native/audio-engine -B native/audio-engine/build
       - name: Build engine
         shell: pwsh
         run: cmake --build native/audio-engine/build --config Release
@@ -31,6 +38,58 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir native/audio-engine/build -C Release --output-on-failure
+      - name: Configure VST3 host
+        shell: pwsh
+        run: cmake -S native/vst3-host -B native/vst3-host/build -DMIXBRIDGE_BUILD_VST3_FIXTURE=ON
+      - name: Build VST3 host + scanner
+        shell: pwsh
+        run: cmake --build native/vst3-host/build --config Release
+      - name: Build deterministic VST3 fixture
+        shell: pwsh
+        run: cmake --build native/vst3-host/build --config Release --target mixbridge-vst3-fixture
+      - name: Prove VST3 load and audio processing
+        shell: pwsh
+        run: |
+          $plugin = Get-ChildItem native/vst3-host/build -Recurse -Filter *.vst3 |
+            Where-Object { $_.FullName -match 'mixbridge-vst3-fixture' } |
+            Select-Object -First 1
+          if (-not $plugin) { throw "again-sample-accurate.vst3 not found" }
+          $probe = Get-ChildItem native/vst3-host/build -Recurse -Filter mb-vst3-probe.exe |
+            Select-Object -First 1
+          if (-not $probe) { throw "mb-vst3-probe.exe not found" }
+          & $probe.FullName $plugin.FullName
+          if ($LASTEXITCODE -ne 0) { throw "VST3 processing probe failed" }
+      - name: Desktop frontend build
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build
+      - name: Tauri Rust check
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        run: cargo check --locked
+      - name: Build Windows installer
+        shell: pwsh
+        run: powershell -File scripts/build-release.ps1
+      - name: Hash Windows installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis -Filter *.exe |
+            Select-Object -First 1
+          if (-not $installer) { throw "MixBridge NSIS installer not found" }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256"
+          Write-Host "installer=$($installer.FullName)"
+          Write-Host "sha256=$hash"
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: MixBridge-Windows
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.sha256
       - name: License files present
         shell: pwsh
         run: |

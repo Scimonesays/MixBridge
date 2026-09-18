@@ -3,6 +3,7 @@
 #include "mixbridge/ring_buffer.hpp"
 #include "mixbridge/types.hpp"
 #include "mixbridge/meters.hpp"
+#include "mixbridge/effect_processor.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -11,6 +12,18 @@
 namespace mixbridge {
 
 // Control + audio slot. Audio thread only reads atomics / ring / tone phase.
+struct StarterVoiceControl {
+  std::atomic<int32_t> note{-1};
+  std::atomic<float> velocity{0.0f};
+  std::atomic<bool> gate{false};
+};
+
+struct StarterVoiceState {
+  double phase = 0.0;
+  float envelope = 0.0f;
+  int32_t latched_note = -1;
+};
+
 struct SourceSlot {
   std::atomic<bool> active{false};
   std::atomic<uint32_t> id{0};
@@ -23,17 +36,17 @@ struct SourceSlot {
   std::atomic<bool> broadcast{true};
   std::atomic<float> tone_hz{0.0f};
   std::atomic<uint32_t> process_id{0};
+  std::atomic<uint32_t> instrument_preset{0};
+  std::atomic<uint32_t> instrument_next_voice{0};
+  StarterVoiceControl instrument_voices[kStarterVoices];
+  StarterVoiceState instrument_state[kStarterVoices];
+  std::atomic<RealtimeEffect*> effect{nullptr};
 
   // Non-realtime metadata (do not touch from audio thread).
   std::wstring device_id;
   std::string name;
-
-  // Optional FX hook (set from control thread; process from audio thread).
-  using FxProcessFn = void (*)(void* ctx, float* interleaved_stereo, uint32_t frames);
-  std::atomic<void*> fx_ctx{nullptr};
-  std::atomic<FxProcessFn> fx_process{nullptr};
-  std::atomic<bool> fx_bypass{true};
-  std::string fx_name;
+  std::string effect_name;
+  std::string effect_path;
 
   SpscFloatRing ring{kRingFrames};
   AtomicMeter meter{};

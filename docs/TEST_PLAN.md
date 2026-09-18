@@ -2,46 +2,65 @@
 
 Status legend: PASS / FAIL / BLOCKED / NOT RUN / PARTIAL
 
-## Phase 3 realtime gates (current)
-
-See `artifacts/qa/latest/SUMMARY.md` for measured evidence.
-
-| Gate | Status |
-|------|--------|
-| 3.1 Physical source | PASS |
-| 3.2 Monitor render | PASS |
-| 3.3 Process loopback in engine | PASS |
-| 3.4 Dual-source mix | PASS |
-| 3.5 Deterministic analysis | PASS |
-| 3.6 Gain | PASS |
-| 3.7 Mute | PASS |
-| 3.8 Meters | PASS |
-| 3.9 Device loss safety | PASS |
-| 3.10 30-min soak | PASS (maintainer accept; xruns=0, WS stable) |
-| 3.11 IPC | PASS |
-| 3.12 Tauri live meter | PASS (IPC live-control proof + Tauri `dev` run) |
-
-## Phase 4.1 product semantics
-
-| Gate | Status |
-|------|--------|
-| Engine ≠ broadcast state | PASS |
-| Go Live blocked without live dest | PASS |
-| Source picker Input/Application | PASS |
-| Multi-source + REMOVE | PASS |
-| Offline system fonts | PASS |
+## Proven realtime engine gates
 
 See `artifacts/qa/latest/SUMMARY.md`.
 
-## Product gates (overall)
+| Gate | Status |
+|---|---|
+| Physical capture | PASS |
+| Monitor render | PASS |
+| Process loopback | PASS |
+| Dual-source mix | PASS |
+| Deterministic analysis | PASS |
+| Gain / mute / routing / meters | PASS |
+| Device-loss safety | PASS |
+| 30-minute engine soak | PASS — accepted evidence, xruns=0 |
+| Named-pipe IPC | PASS |
+| Tauri live control/meter path | PASS |
 
-| Gate | Description | Status |
-|------|-------------|--------|
-| 1 Clean Build | Probes + engine build | PASS (native) |
-| 2 Clean Launch | App launches | PASS (Tauri `mixbridge-desktop` `dev`) |
-| 3 Physical Audio | Product path | PARTIAL (engine harness; Phase 4 product shell next) |
-| 4 Application Capture | Engine process loopback | PASS (harness) |
-| 5–9 | VST3 / virtual out / UX / soak product | NOT RUN |
-| 10 Repository Quality | Docs tracking reality | PASS for Phase 3 docs |
+## V1 automated release pipeline
 
-**10/10 product acceptance still requires all ten product gates.**
+`main` GitHub Actions is authoritative for release readiness. The V1 release-candidate baseline was proven green at commit `146acc2d`.
+
+| Gate | Required proof |
+|---|---|
+| Probes | configure/build + deterministic DSP tests |
+| Engine | configure/build + engine tests |
+| VST3 host | pinned SDK + host/scanner build |
+| Real VST3 processing | build deterministic fixture, load it, process audio |
+| Desktop | production frontend build |
+| Tauri | `cargo check --locked` |
+| Installer | `scripts/build-release.ps1` produces NSIS bundle |
+| Legal | license/provenance files present |
+
+## Product semantics already implemented
+
+- engine state is independent from On Air state
+- Go Live never fakes a missing destination
+- physical + application source selection
+- real monitor + Live output selection
+- multi-source add/remove/gain/mute/route
+- per-source VST3 insert/bypass/fault-to-dry
+- native VST3 editor window + realtime parameter bridge + dirty-state snapshot autosave
+- VST3 component + controller state snapshots
+- automatic source/device/process/VST restore
+- portable bundled native engine sidecar
+- first-party starter instrument source with deterministic non-silence engine test and session restore
+
+## Final hardware acceptance
+
+A cloud runner cannot certify the physical chain. On the target Windows machine verify:
+
+```text
+RME/guitar → MixBridge → Guitar Rig VST3
+Chrome/YouTube → MixBridge
+MixBridge monitor → RME/headphones
+MixBridge Live → installed virtual endpoint → Discord input
+```
+
+Confirm processed guitar + backing track, stable meters, no feedback loop, and correct Standby/On Air behavior.
+
+## First-party MixBridge Output driver
+
+**BLOCKED as a signed artifact**, not faked as PASS. It still requires WDK build, real driver audio injection, production signing and signed endpoint acceptance.

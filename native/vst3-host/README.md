@@ -1,8 +1,8 @@
-# MixBridge VST3 host (Phase 5)
+# MixBridge VST3 host
 
 ## Scope
 
-Host VST3 effects/instruments inside MixBridge source FX chains.
+Host VST3 effects inside MixBridge source FX inserts with realtime-safe processing, native editor hosting, and state restore.
 
 ## Status
 
@@ -10,11 +10,12 @@ Host VST3 effects/instruments inside MixBridge source FX chains.
 |-------|--------|
 | Filesystem `.vst3` scan (`mb-vst3-scan`) | Done — 33 plugins found on this machine including **Guitar Rig 6** |
 | Steinberg VST3 SDK | Fetched locally via `scripts/fetch-vst3sdk.ps1` (not committed) |
-| Process / load / editor / state | **Done** — `mb-vst3-process` + engine FX path |
-| Engine FX insert | **Done** — `ADD_FX` / bypass / state / chain / reorder via IPC |
-| Guitar Rig proof | **PASS** — `scripts/prove-phase5-fx.ps1`, `scripts/prove-dual-source-gr.ps1` (see `artifacts/qa/latest/logs/phase5-fx-proof.txt`, `dual-source-gr-proof.txt`) |
-
-Hosting core is complete for product FX use. Remaining polish: richer editor UX, MIDI→VST3 `IEventList` (see `docs/MIDI.md`), quarantine UX.
+| Process core (`mixbridge_vst3_host`) | Done — module/provider + 48 kHz float32 realtime blocks + bypass |
+| Probe (`mb-vst3-probe`) | Done — deterministic fixture is loaded and audio-processed in CI |
+| Native editor + parameter bridge | Done — plug-in editor hosted in a native Windows window |
+| Processor/controller state snapshots | Done — saved/restored with MixBridge sessions |
+| Engine FX insert | Done — one realtime insert per source with fault-to-dry fallback |
+| Full plug-in process isolation | Future hardening — current faults fall back dry; host-process isolation is not claimed |
 
 ## Commands
 
@@ -23,9 +24,21 @@ powershell -File scripts/fetch-vst3sdk.ps1
 cmake -S native/vst3-host -B native/vst3-host/build -G Ninja
 cmake --build native/vst3-host/build
 native/vst3-host/build/mb-vst3-scan.exe
-powershell -File scripts/prove-phase5-fx.ps1
 ```
 
 ## Non-goals (license)
 
 Do not copy GPL Vital/Helm sources into MixBridge. Research only.
+
+
+## Processing probe
+
+After fetching the pinned SDK:
+
+```text
+cmake -S native/vst3-host -B native/vst3-host/build
+cmake --build native/vst3-host/build --config Release
+native/vst3-host/build/Release/mb-vst3-probe.exe "C:\\Program Files\\Common Files\\VST3\\Guitar Rig 6.vst3"
+```
+
+The probe is intentionally generic. Guitar Rig is a real-world target, not a special-cased dependency.

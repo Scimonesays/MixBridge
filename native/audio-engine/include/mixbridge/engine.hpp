@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -28,6 +29,11 @@ struct AddProcessRequest {
 
 struct AddToneRequest {
   float hz = 440.0f;
+  std::string name;
+};
+
+struct AddInstrumentRequest {
+  uint32_t preset = 0;  // 0 = Neon Keys, 1 = Soft Pad
   std::string name;
 };
 
@@ -63,6 +69,10 @@ public:
   uint32_t add_physical_capture(const AddPhysicalRequest& req, std::string& error);
   uint32_t add_process_loopback(const AddProcessRequest& req, std::string& error);
   uint32_t add_tone(const AddToneRequest& req, std::string& error);
+  uint32_t add_starter_instrument(const AddInstrumentRequest& req, std::string& error);
+  bool instrument_note_on(uint32_t id, uint32_t note, float velocity, std::string& error);
+  bool instrument_note_off(uint32_t id, uint32_t note, std::string& error);
+  bool instrument_all_notes_off(uint32_t id, std::string& error);
   bool remove_source(uint32_t id, std::string& error);
 
   bool set_gain(uint32_t id, float gain);
@@ -73,10 +83,13 @@ public:
   bool set_pan(uint32_t id, float pan);
   bool set_master_gain(float gain);
 
-  // FX hook (control thread). Pass nullptr fn to clear.
-  bool set_source_fx_hook(uint32_t id, SourceSlot::FxProcessFn fn, void* ctx, const std::string& name);
-  bool set_source_fx_bypass(uint32_t id, bool bypass);
-  std::string source_fx_name(uint32_t id) const;
+  bool set_source_vst3(uint32_t id, const std::string& module_path, std::string& error);
+  bool clear_source_effect(uint32_t id, std::string& error);
+  bool set_source_effect_bypass(uint32_t id, bool bypass, std::string& error);
+  bool save_source_effect_state(uint32_t id, const std::string& path, std::string& error);
+  bool load_source_effect_state(uint32_t id, const std::string& path, std::string& error);
+  bool open_source_effect_editor(uint32_t id, std::string& error);
+  bool close_source_effect_editor(uint32_t id, std::string& error);
 
   MeterSnapshot source_meter(uint32_t id);
   MeterSnapshot master_meter();
@@ -124,6 +137,7 @@ private:
   WasapiCaptureSource captures_[kMaxSources];
   WasapiRenderSink monitor_sink_;
   WasapiRenderSink live_sink_;
+  std::unique_ptr<RealtimeEffect> effects_[kMaxSources];
 
   MixGraph graph_;
   AtomicMeter master_meter_;
@@ -158,7 +172,7 @@ private:
   SpscFloatRing tap_ring_{1u << 18};  // ~2.7s stereo @ 48k
   SpscFloatRing live_ring_{1u << 16};  // broadcast → live sink
 
-  std::mutex control_mu_;
+  mutable std::mutex control_mu_;
 };
 
 }  // namespace mixbridge

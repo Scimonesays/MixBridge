@@ -1,60 +1,36 @@
-# Session / preset schema (v1)
+# Session / preset foundation
 
-Schema version 1. Persistence: local JSON under `%LOCALAPPDATA%\MixBridge\presets\`.
+Schema version 1. MixBridge now persists the last working setup locally as JSON under the Tauri application config directory.
 
-## Status
-
-**Implemented** — Discord Jam save/load is wired in the desktop shell (`apps/desktop/src/session.js` + Tauri `session_save` / `session_load`). UI: preset control → Save / Load Discord Jam.
-
-## On-disk shape (example)
+The product default is a quiet auto-save/auto-restore flow: source/device choices and levels are remembered without adding helper copy to the main UI. Process sources are restored by application name when the application is available; unavailable applications remain pending and are retried while MixBridge is open.
 
 ```json
 {
   "version": 1,
   "name": "Discord Jam",
-  "savedAt": "2026-09-18T00:00:00.000Z",
-  "live_dest_ready": true,
-  "live_dest_name": "CABLE Input",
-  "live_device_id": "{wasapi-endpoint-id}",
-  "on_air": false,
+  "monitor_device_id": "",
+  "live_device_id": "",
   "sources": [
     {
-      "id": 1,
       "kind": "physical",
+      "device_id": "",
+      "process_name": null,
       "name": "Fireface 1/2",
-      "device_id": "{capture-id}",
-      "process_name": "",
       "gain": 1.0,
       "mute": false,
       "monitor": true,
       "broadcast": true,
-      "fx": [
-        {
-          "name": "Guitar Rig 6",
-          "path": "C:\\Program Files\\Common Files\\VST3\\Guitar Rig 6.vst3",
-          "state_path": "C:\\Users\\...\\AppData\\Local\\MixBridge\\fx-state\\..."
-        }
-      ]
+      "fx": [],
+      "fx_bypass": false,
+      "fx_state_file": "",
+      "instrument_preset": 0
     },
     {
-      "id": 2,
       "kind": "process",
-      "name": "chrome",
-      "device_id": "",
-      "process_name": "chrome",
+      "device_id": null,
+      "process_name": "Chrome",
+      "name": "Chrome",
       "gain": 0.8,
-      "mute": false,
-      "monitor": true,
-      "broadcast": true,
-      "fx": []
-    },
-    {
-      "id": 3,
-      "kind": "tone",
-      "name": "Keys",
-      "device_id": "",
-      "process_name": "",
-      "gain": 1.0,
       "mute": false,
       "monitor": true,
       "broadcast": true,
@@ -64,6 +40,15 @@ Schema version 1. Persistence: local JSON under `%LOCALAPPDATA%\MixBridge\preset
 }
 ```
 
-## Restore behavior
+Current behavior:
+- monitor and live destination IDs persist;
+- physical sources restore by endpoint ID, with friendly-name fallback;
+- application sources restore by process name and retry when the app starts later;
+- gain, mute, monitor route, and broadcast route persist;
+- the current VST3 insert path, bypass state, and full processor/controller snapshot persist;
+- `fx` remains an array so later plugin-chain expansion does not require replacing the session shape.
 
-On load, the shell clears current engine sources, restores live device when `live_device_id` is set, re-adds sources by kind (`physical` / `process` / `tone`), reapplies gain/mute/monitor/broadcast, and reloads FX path + optional state blob when present. Process sources rematch by running process name (best-effort).
+
+## Built-in instruments
+
+A source with `"kind": "instrument"` restores without external hardware. `instrument_preset` is `0` for **Neon Keys** and `1` for **Soft Pad**. Notes are ephemeral performance state and are never persisted.

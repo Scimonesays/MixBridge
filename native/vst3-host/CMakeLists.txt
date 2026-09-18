@@ -1,45 +1,88 @@
 cmake_minimum_required(VERSION 3.24)
-project(mixbridge_vst3_host LANGUAGES CXX)
+project(mixbridge_vst3_host VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
-  add_compile_options(/W3 /permissive- /EHsc /MP)
-  add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
-endif()
-
-set(VST3_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/vst3sdk")
-if(NOT EXISTS "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting/module.h")
-  message(FATAL_ERROR "VST3 SDK missing. Run scripts/fetch-vst3sdk.ps1")
-endif()
-
-if(NOT TARGET sdk_hosting)
-  set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
-  set(VST_SDK TRUE)
-  add_subdirectory("${VST3_SDK_ROOT}" "${CMAKE_BINARY_DIR}/vst3sdk_build")
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  add_compile_options(/W4 /permissive- /EHsc)
+  add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 add_library(mixbridge_vst3_scan STATIC src/vst3_scan.cpp)
 target_include_directories(mixbridge_vst3_scan PUBLIC include)
 
-add_library(mixbridge_vst3_host STATIC
-  src/vst3_processor.cpp
-  "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting/module_win32.cpp"
-  "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp"
-  "${VST3_SDK_ROOT}/public.sdk/source/common/memorystream.cpp"
-)
-target_include_directories(mixbridge_vst3_host PUBLIC include)
-target_link_libraries(mixbridge_vst3_host PUBLIC sdk_hosting mixbridge_vst3_scan)
-target_link_libraries(mixbridge_vst3_host PRIVATE ole32 uuid shell32 user32)
-
 add_executable(mb-vst3-scan tools/vst3_scan_main.cpp)
 target_link_libraries(mb-vst3-scan PRIVATE mixbridge_vst3_scan)
 
-add_executable(mb-vst3-process tools/vst3_process_main.cpp)
-target_link_libraries(mb-vst3-process PRIVATE mixbridge_vst3_host)
+set(MIXBRIDGE_VST3_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/vst3sdk"
+    CACHE PATH "Path to the pinned Steinberg VST3 SDK checkout")
 
-enable_testing()
-add_test(NAME mb-vst3-scan COMMAND mb-vst3-scan)
+if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
+  set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(SMTG_USE_STATIC_CRT ON CACHE BOOL "Use one static MSVC runtime across MixBridge and VST3 SDK" FORCE)
+  set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${MIXBRIDGE_VST3_SDK}" "${CMAKE_BINARY_DIR}/steinberg-vst3sdk" EXCLUDE_FROM_ALL)
+
+  add_library(mixbridge_vst3_host STATIC
+    src/vst3_host.cpp
+    "${MIXBRIDGE_VST3_SDK}/public.sdk/source/common/memorystream.cpp"
+    "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/plugprovider.cpp"
+  )
+  if(WIN32)
+    target_sources(mixbridge_vst3_host PRIVATE
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/module_win32.cpp"
+    )
+  elseif(APPLE)
+    target_sources(mixbridge_vst3_host PRIVATE
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/module_mac.mm"
+    )
+  else()
+    target_sources(mixbridge_vst3_host PRIVATE
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/hosting/module_linux.cpp"
+    )
+  endif()
+  target_include_directories(mixbridge_vst3_host
+    PUBLIC include
+    PRIVATE "${MIXBRIDGE_VST3_SDK}")
+  target_link_libraries(mixbridge_vst3_host PRIVATE sdk_hosting)
+  if(WIN32)
+    target_link_libraries(mixbridge_vst3_host PRIVATE ole32 user32)
+  endif()
+
+  add_executable(mb-vst3-probe tools/vst3_probe_main.cpp)
+  target_link_libraries(mb-vst3-probe PRIVATE mixbridge_vst3_host)
+
+  option(MIXBRIDGE_BUILD_VST3_FIXTURE "Build Steinberg AGain fixture for host verification" OFF)
+  if(MIXBRIDGE_BUILD_VST3_FIXTURE)
+    set(MIXBRIDGE_AGAIN_DIR
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/samples/vst/again_sampleaccurate")
+    smtg_add_vst3plugin(mixbridge-vst3-fixture
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa_controller.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa_factory.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa_processor.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/agsa.h"
+      "${MIXBRIDGE_AGAIN_DIR}/source/tutorial.cpp"
+      "${MIXBRIDGE_AGAIN_DIR}/source/tutorial.h"
+      "${MIXBRIDGE_AGAIN_DIR}/source/version.h"
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/utility/test/sampleaccuratetest.cpp"
+      "${MIXBRIDGE_VST3_SDK}/public.sdk/source/vst/utility/test/rttransfertest.cpp"
+    )
+    target_link_libraries(mixbridge-vst3-fixture PRIVATE sdk sdk_hosting)
+    if(WIN32)
+      target_sources(mixbridge-vst3-fixture PRIVATE
+        "${MIXBRIDGE_VST3_SDK}/public.sdk/source/main/dllmain.cpp")
+    endif()
+    target_compile_features(mixbridge-vst3-fixture PUBLIC cxx_std_17)
+    smtg_target_configure_version_file(mixbridge-vst3-fixture)
+  endif()
+else()
+  message(STATUS "MixBridge VST3 SDK not present; scanner-only build. Run scripts/fetch-vst3sdk.ps1.")
+endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  enable_testing()
+  add_test(NAME mb-vst3-scan COMMAND mb-vst3-scan)
+endif()

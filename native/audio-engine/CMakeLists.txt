@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   add_compile_options(/W4 /permissive- /Zc:__cplusplus /EHsc)
   add_compile_definitions(UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
@@ -23,6 +24,19 @@ target_link_libraries(mixbridge_engine_core PUBLIC
   ole32 uuid mmdevapi avrt ksuser runtimeobject
 )
 
+set(MIXBRIDGE_VST3_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/vst3sdk"
+    CACHE PATH "Path to the pinned Steinberg VST3 SDK checkout")
+if(EXISTS "${MIXBRIDGE_VST3_SDK}/CMakeLists.txt")
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../vst3-host"
+                   "${CMAKE_BINARY_DIR}/vst3-host" EXCLUDE_FROM_ALL)
+  target_sources(mixbridge_engine_core PRIVATE src/vst3_effect_factory.cpp)
+  target_link_libraries(mixbridge_engine_core PRIVATE mixbridge_vst3_host)
+  target_compile_definitions(mixbridge_engine_core PRIVATE MIXBRIDGE_HAS_VST3=1)
+else()
+  target_sources(mixbridge_engine_core PRIVATE src/vst3_effect_stub.cpp)
+  target_compile_definitions(mixbridge_engine_core PRIVATE MIXBRIDGE_HAS_VST3=0)
+endif()
+
 add_executable(mixbridge_audio_engine src/main.cpp)
 target_link_libraries(mixbridge_audio_engine PRIVATE mixbridge_engine_core)
 
@@ -36,16 +50,6 @@ add_executable(mb-engine-ipc tools/engine_ipc_server.cpp)
 target_link_libraries(mb-engine-ipc PRIVATE mixbridge_engine_core)
 if(WIN32)
   target_link_libraries(mb-engine-ipc PRIVATE user32)
-endif()
-
-# Optional VST3 hosting (Phase 5) — linked into IPC process.
-set(VST3_HOST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../vst3-host")
-if(EXISTS "${VST3_HOST_DIR}/include/mixbridge/vst3_processor.hpp")
-  if(NOT TARGET mixbridge_vst3_host)
-    add_subdirectory("${VST3_HOST_DIR}" "${CMAKE_BINARY_DIR}/vst3_host")
-  endif()
-  target_compile_definitions(mb-engine-ipc PRIVATE MIXBRIDGE_WITH_VST3=1)
-  target_link_libraries(mb-engine-ipc PRIVATE mixbridge_vst3_host)
 endif()
 
 enable_testing()

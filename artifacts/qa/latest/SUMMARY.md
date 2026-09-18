@@ -1,35 +1,52 @@
-﻿# MixBridge QA — continuing toward final acceptance
+# MixBridge QA — V1 release-candidate baseline
 
-Date: 2026-09-18T00:10:00Z
-Head: local `main` (post Phase 5 FX)
+Date: 2026-09-18
+Commit: `146acc2d`
 
-## Proven
+## Automated Windows release gates
 
-| Area | Status | Evidence |
-|------|--------|----------|
-| Phase 3 gates | PASS | prior SUMMARY |
-| Phase 4.1 semantics | PASS | prove-phase41-ipc |
-| Go Live → Live picker when no dest | PASS | UI `needs-attention` + modal |
-| VST3 load/process Guitar Rig 6 | PASS | mb-vst3-process + prove-phase5-fx |
-| FX bypass/state/chain/reorder | PASS | prove-phase5-fx.ps1 |
-| Dual physical+app + GR | see latest run | prove-dual-source-gr.ps1 |
-| Discord Jam save/load | Wired | session.js + Tauri session_* |
-| Live WASAPI destination | PASS | SET_LIVE_DEVICE |
+GitHub Actions run `35314698283` completed **PASS** end-to-end.
 
-## External / remaining blockers
+| Gate | Status |
+|---|---|
+| Probes / deterministic DSP | PASS |
+| Realtime engine build | PASS |
+| Engine tests | PASS |
+| Starter instrument non-silence test | PASS |
+| Pinned Steinberg VST3 SDK build | PASS |
+| Deterministic VST3 fixture build | PASS |
+| Real VST3 load + audio processing probe | PASS |
+| Desktop frontend production build | PASS |
+| Tauri Rust check | PASS |
+| Windows NSIS installer build | PASS |
+| Installer SHA-256 generation | PASS |
+| Installer artifact upload | PASS |
+| License/provenance files present | PASS |
 
-| Item | Status |
-|------|--------|
-| `WindowsKernelModeDriver10.0` VS toolset | **BLOCKED** — WDK headers installed; Build Tools lack kernel toolset extension. Cannot compile MixBridge Output SYS yet. |
-| Production EV driver signing | BLOCKED until certificate |
-| Discord E2E manual | Pending once Live dest chosen (virtual cable or MixBridge Output) |
-| Final screenshots / soak / installer | In progress |
+## Previously measured realtime evidence
 
-## Workaround for Discord today
+Phase 3 gates 3.1–3.12 remain **PASS**, including physical RME capture/render, process loopback, dual-source analysis, device invalidation safety, named-pipe IPC, Tauri live control, and the accepted 30-minute soak with 0 xruns.
 
-1. Install VB-CABLE (or similar) externally if desired.
-2. MixBridge Live → select CABLE Input (render).
-3. Discord Input → CABLE Output (capture).
-4. Go Live.
+## Product semantics
 
-First-party **MixBridge Output** replaces steps 1–3 when the WDK toolset is available.
+- **Standby** keeps the engine and monitor path running.
+- **Go Live / On Air** controls only the broadcast path.
+- Physical input, application capture, built-in instruments, monitor routing, Live routing, source gain/mute/remove, VST3 insert/editor/state restore, and automatic saved-session restore are implemented.
+- The supported V1 Discord path uses a real selected Windows Live render endpoint, such as an installed virtual cable.
+
+## Hardware acceptance still required
+
+Cloud CI cannot certify the final physical chain:
+
+```text
+RME / guitar → MixBridge → Guitar Rig VST3
+Chrome / YouTube → MixBridge
+MixBridge monitor → RME / headphones
+MixBridge Live → installed virtual endpoint → Discord input
+```
+
+That real-machine smoke test must verify processed guitar + backing track, stable meters, no feedback loop, and correct Standby/On Air behavior.
+
+## First-party MixBridge Output driver
+
+**Not claimed as complete.** A branded signed `MixBridge Output` capture endpoint still requires WDK integration, real user-mode → kernel audio transport, production signing, installer lifecycle proof, and signed Discord/OBS capture validation. See `native/driver/README.md`.

@@ -1,4 +1,5 @@
 #include "mixbridge/engine.hpp"
+#include "mixbridge/vst3_effect_factory.hpp"
 #include "mixbridge/wasapi_util.hpp"
 
 #include <windows.h>
@@ -7,17 +8,6 @@
 #include <cstring>
 
 namespace mixbridge {
-namespace {
-
-std::string wide_to_utf8(const std::wstring& ws) {
-  if (ws.empty()) return {};
-  int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, nullptr, 0, nullptr, nullptr);
-  std::string out(static_cast<size_t>(n > 0 ? n - 1 : 0), '\0');
-  if (n > 1) WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), -1, out.data(), n, nullptr, nullptr);
-  return out;
-}
-
-}  // namespace
 
 Engine::Engine() = default;
 
@@ -39,7 +29,11 @@ void Engine::shutdown() {
   stop_live_thread();
   for (uint32_t i = 0; i < kMaxSources; ++i) {
     captures_[i].stop();
+    slots_[i].effect.store(nullptr, std::memory_order_release);
     slots_[i].active.store(false);
+    effects_[i].reset();
+    slots_[i].effect_name.clear();
+    slots_[i].effect_path.clear();
   }
   devices_.shutdown();
 }
@@ -75,31 +69,6 @@ EngineDiagnostics Engine::diagnostics() const {
     d.estimated_latency_ms =
       1000.0 * static_cast<double>(d.buffer_frames) / static_cast<double>(d.device_rate);
   }
-  // Feedback risk: live render endpoint matches monitor or a physical capture source.
-  float risk = 0.0f;
-  if (!live_device_id_.empty()) {
-    if (!monitor_device_id_.empty() && live_device_id_ == monitor_device_id_) risk = 1.0f;
-    for (uint32_t i = 0; i < kMaxSources; ++i) {
-      if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
-      const auto kind = static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed));
-      if (kind == SourceKind::PhysicalCapture && !slots_[i].device_id.empty() &&
-          slots_[i].device_id == live_device_id_) {
-        risk = 1.0f;
-        break;
-      }
-    }
-    // Same-device family heuristic: Speakers/Headphones as live while monitoring same card is risky when capturing.
-    if (risk < 1.0f && broadcast_state() == BroadcastState::Live) {
-      for (uint32_t i = 0; i < kMaxSources; ++i) {
-        if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
-        if (static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed)) ==
-            SourceKind::PhysicalCapture) {
-          risk = (std::max)(risk, 0.35f);
-        }
-      }
-    }
-  }
-  d.feedback_risk = risk;
   return d;
 }
 
@@ -107,6 +76,7 @@ std::vector<DeviceInfo> Engine::list_capture_devices() const { return devices_.l
 std::vector<DeviceInfo> Engine::list_render_devices() const { return devices_.list_render(); }
 
 std::vector<SourceInfo> Engine::list_sources() const {
+  std::lock_guard<std::mutex> lock(control_mu_);
   std::vector<SourceInfo> out;
   for (uint32_t i = 0; i < kMaxSources; ++i) {
     if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
@@ -114,12 +84,20 @@ std::vector<SourceInfo> Engine::list_sources() const {
     info.id = slots_[i].id.load(std::memory_order_relaxed);
     info.kind = static_cast<SourceKind>(slots_[i].kind.load(std::memory_order_relaxed));
     info.name = slots_[i].name;
-    info.device_id = wide_to_utf8(slots_[i].device_id);
     info.gain = slots_[i].gain.load(std::memory_order_relaxed);
     info.mute = slots_[i].mute.load(std::memory_order_relaxed);
     info.monitor = slots_[i].monitor.load(std::memory_order_relaxed);
     info.broadcast = slots_[i].broadcast.load(std::memory_order_relaxed);
     info.process_id = slots_[i].process_id.load(std::memory_order_relaxed);
+    info.effect_name = slots_[i].effect_name;
+    info.effect_path = slots_[i].effect_path;
+    info.instrument_preset = slots_[i].instrument_preset.load(std::memory_order_relaxed);
+    if (auto* effect_ptr = slots_[i].effect.load(std::memory_order_acquire)) {
+      info.effect_bypass = effect_ptr->bypass();
+      info.effect_faulted = effect_ptr->faulted();
+      info.effect_editor_open = effect_ptr->editor_open();
+      info.effect_dirty = effect_ptr->editor_dirty();
+    }
     out.push_back(std::move(info));
   }
   return out;
@@ -169,14 +147,20 @@ void Engine::free_slot(int index) {
   if (index < 0 || index >= static_cast<int>(kMaxSources)) return;
   captures_[index].stop();
   slots_[index].active.store(false, std::memory_order_release);
+  slots_[index].effect.store(nullptr, std::memory_order_release);
   slots_[index].ring.clear();
   slots_[index].meter.reset();
   slots_[index].name.clear();
   slots_[index].device_id.clear();
-  slots_[index].fx_process.store(nullptr, std::memory_order_release);
-  slots_[index].fx_ctx.store(nullptr, std::memory_order_release);
-  slots_[index].fx_name.clear();
-  slots_[index].fx_bypass.store(true, std::memory_order_release);
+  slots_[index].effect_name.clear();
+  slots_[index].effect_path.clear();
+  slots_[index].instrument_preset.store(0, std::memory_order_relaxed);
+  slots_[index].instrument_next_voice.store(0, std::memory_order_relaxed);
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    slots_[index].instrument_voices[v].gate.store(false, std::memory_order_relaxed);
+    slots_[index].instrument_voices[v].note.store(-1, std::memory_order_relaxed);
+    slots_[index].instrument_voices[v].velocity.store(0.0f, std::memory_order_relaxed);
+  }
 }
 
 SourceSlot* Engine::slot_by_id(uint32_t id) {
@@ -201,6 +185,7 @@ uint32_t Engine::add_tone(const AddToneRequest& req, std::string& error) {
   slot.id.store(id);
   slot.kind.store(static_cast<uint32_t>(SourceKind::ToneFixture));
   slot.tone_hz.store(req.hz);
+  slot.effect.store(nullptr, std::memory_order_relaxed);
   slot.gain.store(1.0f);
   slot.pan.store(0.0f);
   slot.mute.store(false);
@@ -237,6 +222,7 @@ uint32_t Engine::add_physical_capture(const AddPhysicalRequest& req, std::string
   const uint32_t id = next_id_.fetch_add(1);
   slot.id.store(id);
   slot.kind.store(static_cast<uint32_t>(SourceKind::PhysicalCapture));
+  slot.effect.store(nullptr, std::memory_order_relaxed);
   slot.device_id = wasapi::device_id_string(device);
   if (!req.name.empty()) {
     slot.name = req.name;
@@ -281,6 +267,7 @@ uint32_t Engine::add_process_loopback(const AddProcessRequest& req, std::string&
   slot.id.store(id);
   slot.kind.store(static_cast<uint32_t>(SourceKind::ProcessLoopback));
   slot.process_id.store(req.pid);
+  slot.effect.store(nullptr, std::memory_order_relaxed);
   slot.name = req.name.empty() ? ("pid-" + std::to_string(req.pid)) : req.name;
   slot.gain.store(1.0f);
   slot.mute.store(false);
@@ -296,16 +283,199 @@ uint32_t Engine::add_process_loopback(const AddProcessRequest& req, std::string&
   return id;
 }
 
-bool Engine::remove_source(uint32_t id, std::string& error) {
+uint32_t Engine::add_starter_instrument(
+  const AddInstrumentRequest& req,
+  std::string& error) {
   std::lock_guard<std::mutex> lock(control_mu_);
-  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
-    if (slots_[i].active.load() && slots_[i].id.load() == id) {
-      free_slot(i);
-      return true;
+  const int idx = alloc_slot();
+  if (idx < 0) {
+    error = "no free source slots";
+    return 0;
+  }
+  auto& slot = slots_[idx];
+  const uint32_t id = next_id_.fetch_add(1);
+  const uint32_t preset = std::min(req.preset, 1u);
+  slot.id.store(id);
+  slot.kind.store(static_cast<uint32_t>(SourceKind::StarterInstrument));
+  slot.effect.store(nullptr, std::memory_order_relaxed);
+  slot.instrument_preset.store(preset, std::memory_order_relaxed);
+  slot.instrument_next_voice.store(0, std::memory_order_relaxed);
+  slot.gain.store(1.0f);
+  slot.pan.store(0.0f);
+  slot.mute.store(false);
+  slot.solo.store(false);
+  slot.monitor.store(true);
+  slot.broadcast.store(true);
+  slot.process_id.store(0);
+  slot.name = req.name.empty()
+    ? (preset == 1 ? "Soft Pad" : "Neon Keys")
+    : req.name;
+  slot.ring.clear();
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    slot.instrument_voices[v].gate.store(false, std::memory_order_relaxed);
+    slot.instrument_voices[v].note.store(-1, std::memory_order_relaxed);
+    slot.instrument_voices[v].velocity.store(0.0f, std::memory_order_relaxed);
+    slot.instrument_state[v] = {};
+  }
+  slot.active.store(true, std::memory_order_release);
+  return id;
+}
+
+bool Engine::instrument_note_on(
+  uint32_t id, uint32_t note, float velocity, std::string& error) {
+  if (note > 127) {
+    error = "invalid_instrument_note";
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(control_mu_);
+  SourceSlot* slot = nullptr;
+  for (auto& candidate : slots_) {
+    if (candidate.active.load(std::memory_order_relaxed) &&
+        candidate.id.load(std::memory_order_relaxed) == id) {
+      slot = &candidate;
+      break;
     }
   }
-  error = "source not found";
-  return false;
+  if (!slot) {
+    error = "source not found";
+    return false;
+  }
+  if (static_cast<SourceKind>(slot->kind.load(std::memory_order_relaxed)) !=
+      SourceKind::StarterInstrument) {
+    error = "source is not an instrument";
+    return false;
+  }
+
+  int selected = -1;
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    if (slot->instrument_voices[v].gate.load(std::memory_order_relaxed) &&
+        slot->instrument_voices[v].note.load(std::memory_order_relaxed) ==
+          static_cast<int32_t>(note)) {
+      selected = static_cast<int>(v);
+      break;
+    }
+  }
+  if (selected < 0) {
+    for (uint32_t v = 0; v < kStarterVoices; ++v) {
+      if (!slot->instrument_voices[v].gate.load(std::memory_order_relaxed)) {
+        selected = static_cast<int>(v);
+        break;
+      }
+    }
+  }
+  if (selected < 0) {
+    selected = static_cast<int>(
+      slot->instrument_next_voice.fetch_add(1, std::memory_order_relaxed) % kStarterVoices);
+    slot->instrument_voices[selected].gate.store(false, std::memory_order_release);
+  }
+
+  auto& voice = slot->instrument_voices[selected];
+  voice.note.store(static_cast<int32_t>(note), std::memory_order_relaxed);
+  voice.velocity.store(std::clamp(velocity, 0.0f, 1.0f), std::memory_order_relaxed);
+  voice.gate.store(true, std::memory_order_release);
+  return true;
+}
+
+bool Engine::instrument_note_off(
+  uint32_t id, uint32_t note, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  SourceSlot* slot = nullptr;
+  for (auto& candidate : slots_) {
+    if (candidate.active.load(std::memory_order_relaxed) &&
+        candidate.id.load(std::memory_order_relaxed) == id) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (!slot) {
+    error = "source not found";
+    return false;
+  }
+  if (static_cast<SourceKind>(slot->kind.load(std::memory_order_relaxed)) !=
+      SourceKind::StarterInstrument) {
+    error = "source is not an instrument";
+    return false;
+  }
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    auto& voice = slot->instrument_voices[v];
+    if (voice.note.load(std::memory_order_relaxed) == static_cast<int32_t>(note)) {
+      voice.gate.store(false, std::memory_order_release);
+    }
+  }
+  return true;
+}
+
+bool Engine::instrument_all_notes_off(uint32_t id, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  SourceSlot* slot = nullptr;
+  for (auto& candidate : slots_) {
+    if (candidate.active.load(std::memory_order_relaxed) &&
+        candidate.id.load(std::memory_order_relaxed) == id) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (!slot) {
+    error = "source not found";
+    return false;
+  }
+  if (static_cast<SourceKind>(slot->kind.load(std::memory_order_relaxed)) !=
+      SourceKind::StarterInstrument) {
+    error = "source is not an instrument";
+    return false;
+  }
+  for (auto& voice : slot->instrument_voices) {
+    voice.gate.store(false, std::memory_order_release);
+  }
+  return true;
+}
+
+bool Engine::remove_source(uint32_t id, std::string& error) {
+  int index = -1;
+  bool has_effect = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id) {
+        index = i;
+        has_effect = effects_[i] != nullptr;
+        break;
+      }
+    }
+  }
+  if (index < 0) {
+    error = "source not found";
+    return false;
+  }
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (has_effect && was_running) stop();
+
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (!slots_[index].active.load() || slots_[index].id.load() != id) {
+      error = "source changed during remove";
+      return false;
+    }
+    slots_[index].effect.store(nullptr, std::memory_order_release);
+    free_slot(index);
+    effects_[index].reset();
+  }
+
+  if (has_effect && was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) {
+      error = "source_removed_monitor_resume_failed:" + resume_error;
+      return false;
+    }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      error = "source_removed_live_resume_failed:" + resume_error;
+      return false;
+    }
+  }
+  return true;
 }
 
 bool Engine::set_gain(uint32_t id, float gain) {
@@ -355,35 +525,224 @@ bool Engine::set_master_gain(float gain) {
   return true;
 }
 
-bool Engine::set_source_fx_hook(uint32_t id, SourceSlot::FxProcessFn fn, void* ctx,
-                                const std::string& name) {
-  std::lock_guard<std::mutex> lock(control_mu_);
-  auto* s = slot_by_id(id);
-  if (!s) return false;
-  s->fx_process.store(fn, std::memory_order_release);
-  s->fx_ctx.store(ctx, std::memory_order_release);
-  s->fx_name = name;
-  // Hook present → process unless explicitly bypassed. Clearing hook restores bypass.
-  s->fx_bypass.store(!fn, std::memory_order_release);
+bool Engine::set_source_vst3(uint32_t id, const std::string& module_path, std::string& error) {
+  int index = -1;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id) { index = i; break; }
+    }
+  }
+  if (index < 0) { error = "source not found"; return false; }
+  if (module_path.empty()) return clear_source_effect(id, error);
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  auto effect_ptr = create_vst3_effect(module_path, error);
+  if (!effect_ptr) {
+    if (was_running) {
+      std::string resume_error;
+      if (!start(resume_error)) error += "|monitor_resume_failed:" + resume_error;
+      else if (was_live && live_destination_ready() && !enable_broadcast(resume_error))
+        error += "|live_resume_failed:" + resume_error;
+    }
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (!slots_[index].active.load() || slots_[index].id.load() != id) {
+      error = "source changed during effect load";
+      return false;
+    }
+    slots_[index].effect.store(nullptr, std::memory_order_release);
+    effects_[index] = std::move(effect_ptr);
+    slots_[index].effect_name = std::string(effects_[index]->name());
+    slots_[index].effect_path = module_path;
+    slots_[index].effect.store(effects_[index].get(), std::memory_order_release);
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) { error = "effect_loaded_monitor_resume_failed:" + resume_error; return false; }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      error = "effect_loaded_live_resume_failed:" + resume_error; return false;
+    }
+  }
   return true;
 }
 
-bool Engine::set_source_fx_bypass(uint32_t id, bool bypass) {
-  if (auto* s = slot_by_id(id)) {
-    s->fx_bypass.store(bypass, std::memory_order_release);
+bool Engine::clear_source_effect(uint32_t id, std::string& error) {
+  int index = -1;
+  bool has_effect = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id) {
+        index = i; has_effect = effects_[i] != nullptr; break;
+      }
+    }
+  }
+  if (index < 0) { error = "source not found"; return false; }
+  if (!has_effect) return true;
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    slots_[index].effect.store(nullptr, std::memory_order_release);
+    effects_[index].reset();
+    slots_[index].effect_name.clear();
+    slots_[index].effect_path.clear();
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) { error = "effect_cleared_monitor_resume_failed:" + resume_error; return false; }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      error = "effect_cleared_live_resume_failed:" + resume_error; return false;
+    }
+  }
+  return true;
+}
+
+bool Engine::set_source_effect_bypass(uint32_t id, bool bypass, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+    if (!slots_[i].active.load() || slots_[i].id.load() != id) continue;
+    if (!effects_[i]) { error = "source has no effect"; return false; }
+    effects_[i]->set_bypass(bypass);
     return true;
   }
+  error = "source not found";
   return false;
 }
 
-std::string Engine::source_fx_name(uint32_t id) const {
-  for (uint32_t i = 0; i < kMaxSources; ++i) {
-    if (slots_[i].active.load(std::memory_order_relaxed) &&
-        slots_[i].id.load(std::memory_order_relaxed) == id) {
-      return slots_[i].fx_name;
+bool Engine::save_source_effect_state(
+  uint32_t id,
+  const std::string& path,
+  std::string& error) {
+  int index = -1;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id && effects_[i]) {
+        index = i;
+        break;
+      }
     }
   }
-  return {};
+  if (index < 0) {
+    error = "source effect not found";
+    return false;
+  }
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  bool ok_state = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (effects_[index] && slots_[index].id.load() == id) {
+      ok_state = effects_[index]->save_state_file(path, error);
+    } else {
+      error = "source effect changed during save";
+    }
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) {
+      if (error.empty()) error = "effect_state_monitor_resume_failed:" + resume_error;
+      return false;
+    }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      if (error.empty()) error = "effect_state_live_resume_failed:" + resume_error;
+      return false;
+    }
+  }
+  return ok_state;
+}
+
+bool Engine::load_source_effect_state(
+  uint32_t id,
+  const std::string& path,
+  std::string& error) {
+  int index = -1;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+      if (slots_[i].active.load() && slots_[i].id.load() == id && effects_[i]) {
+        index = i;
+        break;
+      }
+    }
+  }
+  if (index < 0) {
+    error = "source effect not found";
+    return false;
+  }
+
+  const auto before = state();
+  const bool was_running = before == EngineState::Running || before == EngineState::Starting;
+  const bool was_live = broadcast_state() == BroadcastState::Live;
+  if (was_running) stop();
+
+  bool ok_state = false;
+  {
+    std::lock_guard<std::mutex> lock(control_mu_);
+    if (effects_[index] && slots_[index].id.load() == id) {
+      ok_state = effects_[index]->load_state_file(path, error);
+    } else {
+      error = "source effect changed during load";
+    }
+  }
+
+  if (was_running) {
+    std::string resume_error;
+    if (!start(resume_error)) {
+      if (error.empty()) error = "effect_state_monitor_resume_failed:" + resume_error;
+      return false;
+    }
+    if (was_live && live_destination_ready() && !enable_broadcast(resume_error)) {
+      if (error.empty()) error = "effect_state_live_resume_failed:" + resume_error;
+      return false;
+    }
+  }
+  return ok_state;
+}
+
+bool Engine::open_source_effect_editor(uint32_t id, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+    if (slots_[i].active.load() && slots_[i].id.load() == id) {
+      if (!effects_[i]) { error = "source has no effect"; return false; }
+      return effects_[i]->open_editor(error);
+    }
+  }
+  error = "source not found";
+  return false;
+}
+
+bool Engine::close_source_effect_editor(uint32_t id, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  for (int i = 0; i < static_cast<int>(kMaxSources); ++i) {
+    if (slots_[i].active.load() && slots_[i].id.load() == id) {
+      if (!effects_[i]) { error = "source has no effect"; return false; }
+      effects_[i]->close_editor();
+      return true;
+    }
+  }
+  error = "source not found";
+  return false;
 }
 
 MeterSnapshot Engine::source_meter(uint32_t id) {

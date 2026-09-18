@@ -2,8 +2,11 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 static int fail(const char* msg) {
   std::fprintf(stderr, "FAIL: %s\n", msg);
@@ -32,10 +35,34 @@ int main() {
   if (!engine.remove_source(b, err)) return fail("remove b");
   if (!engine.list_sources().empty()) return fail("expected empty");
 
+  const uint32_t keys =
+    engine.add_starter_instrument({.preset = 0, .name = "Neon Keys"}, err);
+  if (!keys) return fail("add starter instrument");
+  if (!engine.instrument_note_on(keys, 60, 0.9f, err)) return fail("instrument note on");
+  std::vector<float> synth_mon(512 * 2, 0.0f);
+  std::vector<float> synth_bc(512 * 2, 0.0f);
+  engine.render_offline(512, synth_mon.data(), synth_bc.data());
+  float synth_peak = 0.0f;
+  for (float sample : synth_mon) synth_peak = std::max(synth_peak, std::abs(sample));
+  if (synth_peak < 0.001f) return fail("starter instrument produced silence");
+  if (!engine.instrument_note_off(keys, 60, err)) return fail("instrument note off");
+  if (!engine.instrument_all_notes_off(keys, err)) return fail("instrument notes off");
+  if (!engine.remove_source(keys, err)) return fail("remove instrument");
+  if (!engine.list_sources().empty()) return fail("instrument remove failed");
+
   // Broadcast cannot go live without destination.
   if (engine.enable_broadcast(err)) return fail("enable_broadcast should fail");
   if (err != "no_live_destination") return fail("expected no_live_destination");
   if (engine.broadcast_state() != mixbridge::BroadcastState::Standby) return fail("broadcast not standby");
+
+  // Hosted CI runners may have no render endpoint at all. Keep the hardware-free
+  // state/source assertions in CI; the RME acceptance harness owns the real
+  // monitor + live transition proof.
+  if (engine.list_render_devices().empty()) {
+    engine.shutdown();
+    std::printf("phase41_state_remove_result=PASS hardware_live=SKIP_no_render_endpoint\n");
+    return 0;
+  }
 
   engine.set_live_destination_ready(true);
   // Still needs running/starting engine

@@ -1,36 +1,26 @@
 # MixBridge roadmap
 
-## Phase 0 — Environment
-Detect/install toolchain; document setup. **In progress / largely done on primary dev machine.**
+## V1 complete application track
 
-## Phase 1 — Research
-Upstream clones, license firewall, architecture selection. **In progress.**
+- **Environment / research / licensing:** done for V1.
+- **Audio probes:** capture, render, system loopback, process loopback and deterministic DSP — done.
+- **Realtime engine:** C++20/WASAPI graph, monitor + broadcast buses, meters, IPC, recovery states and soak harness — done.
+- **Product shell:** icon-first Sources → Mix → Outputs, real source/output pickers, Standby/On Air state and automatic session restore — done.
+- **VST3:** discovery, load/process, per-source insert, bypass, dry fallback, live native editor window, realtime parameter bridge, component/controller state snapshots and session restore — done.
+- **Live output:** user-selected real Windows render/virtual-cable endpoint — done.
+- **Packaging:** portable sidecar + NSIS release script + CI installer gate — implemented.
+- **Starter instruments:** first-party Neon Keys + Soft Pad, polyphonic keyboard UI, normal FX/monitor/live routing and session restore — done.
+- **Release UI:** final broadcast-console visual pass + README product screenshot — done.
 
-## Phase 2 — Audio probes
-Enumerate, capture, render, system loopback, process loopback, deterministic DSP tests. **Done on this machine.**
+## Future enhancements
 
-## Phase 3 — Engine
-Realtime C++ engine with WASAPI sources/sinks, mix graph, meters, states, IPC, soak harness, Tauri shell. **Complete — gates 3.1–3.12 PASS** (`artifacts/qa/latest/SUMMARY.md`).
+- Multi-plugin chains instead of the V1 single insert.
+- MixBridge Send VST3 for DAW-to-MixBridge routing.
+- Expanded MIDI controller support and additional first-party instruments.
+- Network/jam features.
 
-## Phase 4 — UI shell
-Icon-first product shell: Sources → Mix → Outputs; engine vs broadcast state separated; real source picker (Input / Application); multi-source cards. **Phase 4.1 complete** — On Air awaits Phase 6 live destination.
+## Separate signed-driver track
 
-## Phase 5 — VST3
-**Hosting core complete** — Guitar Rig 6 proven (`prove-phase5-fx.ps1`, `prove-dual-source-gr.ps1`): load/process/bypass/state/chain/reorder. Editor API present.
+A first-party Windows capture endpoint named **MixBridge Output** remains a separate deliverable. It requires WDK integration, an actual user-mode → kernel audio transport, production/attestation signing, installer lifecycle proof and real Discord/OBS capture validation.
 
-## Phase 6 — Virtual output
-- **6.1** Live WASAPI render destination (user-selected endpoint / virtual cable) — **done**; enables real On Air.
-- **6.2** First-party MixBridge Output VAD — **scaffolded** in `native/driver/` (PortCls + KMDF); compile blocked on `WindowsKernelModeDriver10.0` toolset; install blocked on test/production signing until built.
-- **Live path today:** WASAPI render to user-selected endpoint (6.1) until driver installed — see `docs/AUDIO_PIPELINE.md`.
-
-## Phase 7 — Product UX
-Discord Jam preset save/load wired; Instruments + FX in picker; Go Live focuses Live destination. Continue polish + screenshots.
-
-## Phase 8 — Reliability
-Hotplug, recovery, soak, feedback detection.
-
-## Phase 9 — Packaging
-Installer/upgrade/uninstall; driver signing story.
-
-## Phase 10 — Final acceptance
-All ten gates PASS with QA evidence.
+The V1 application does not depend on falsely claiming that driver exists; it uses a real selected Windows Live render endpoint.
