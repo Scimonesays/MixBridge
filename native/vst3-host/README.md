@@ -1,8 +1,8 @@
-# MixBridge VST3 host (Phase 5)
+# MixBridge VST3 host
 
 ## Scope
 
-Host VST3 effects/instruments inside MixBridge source FX chains.
+Host VST3 effects inside MixBridge source FX inserts with realtime-safe processing, native editor hosting, and state restore.
 
 ## Status
 
@@ -10,10 +10,12 @@ Host VST3 effects/instruments inside MixBridge source FX chains.
 |-------|--------|
 | Filesystem `.vst3` scan (`mb-vst3-scan`) | Done — 33 plugins found on this machine including **Guitar Rig 6** |
 | Steinberg VST3 SDK | Fetched locally via `scripts/fetch-vst3sdk.ps1` (not committed) |
-| Process core (`mixbridge_vst3_host`) | Implemented on release branch — module/provider + float32 realtime blocks + bypass |
-| Probe (`mb-vst3-probe`) | Implemented; accepts an installed `.vst3` path for real processing proof |
-| Editor / parameter state / quarantine | Next |
-| Engine FX insert | Next — wire per-source chain after host CI is green |
+| Process core (`mixbridge_vst3_host`) | Done — module/provider + 48 kHz float32 realtime blocks + bypass |
+| Probe (`mb-vst3-probe`) | Done — deterministic fixture is loaded and audio-processed in CI |
+| Native editor + parameter bridge | Done — plug-in editor hosted in a native Windows window |
+| Processor/controller state snapshots | Done — saved/restored with MixBridge sessions |
+| Engine FX insert | Done — one realtime insert per source with fault-to-dry fallback |
+| Full plug-in process isolation | Future hardening — current faults fall back dry; host-process isolation is not claimed |
 
 ## Commands
 

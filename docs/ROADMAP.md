@@ -12,7 +12,7 @@
 - **Starter instruments:** first-party Neon Keys + Soft Pad, polyphonic keyboard UI, normal FX/monitor/live routing and session restore — done.
 - **Release UI:** final broadcast-console visual pass + README product screenshot — done.
 
-## Post-V1 enhancements
+## Future enhancements
 
 - Multi-plugin chains instead of the V1 single insert.
 - MixBridge Send VST3 for DAW-to-MixBridge routing.

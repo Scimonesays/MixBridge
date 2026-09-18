@@ -1,16 +1,16 @@
 # MixBridge
 
-**MixBridge makes complicated Windows audio routing feel almost invisible.**
+**MixBridge makes complicated PC audio routing feel almost invisible.**
 
 Route a guitar or microphone, an application such as Chrome, and a VST3 effect into one simple live mix. Monitor it locally, then send that same mix to a real Windows Live output for Discord, OBS, meetings, games, or recording.
 
 ![MixBridge UI preview](docs/images/mixbridge-ui-preview.jpg)
 
-> Rendered from the real MixBridge desktop shell with a representative saved session; this is not a separate concept mockup.
+> UI preview rendered from the production MixBridge desktop shell with a representative saved session. Hardware acceptance screenshots remain separate evidence.
 
 ## V1 status
 
-The **V1 application path is feature-complete on `finish/mixbridge-release`** and is held on that branch until its Windows CI/release gates are green.
+The **V1 application path is feature-complete and CI-proven on `main`**. The Windows release pipeline builds and tests the realtime engine, deterministic VST3 processing, desktop shell, Tauri backend, and NSIS installer.
 
 Implemented today:
 
@@ -70,4 +70,4 @@ MixBridge application code: MIT — see `LICENSE`. Third-party notices and the l
 
 ## Release discipline
 
-Do not merge, publish, or release without explicit maintainer approval. V1 completion work is isolated on `finish/mixbridge-release`; `main` remains untouched until the maintainer chooses to merge it.
+`main` is the release-candidate source of truth. Every change must preserve the green Windows CI gates, license firewall, honest hardware/driver status, and the Sources → Mix → Outputs product doctrine.

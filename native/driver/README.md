@@ -12,7 +12,7 @@ This path is implemented and is the supported V1 route.
 
 ## First-party endpoint goal
 
-A later signed Windows capture endpoint named **MixBridge Output** would let Discord/OBS select MixBridge directly.
+A signed Windows capture endpoint named **MixBridge Output** would let Discord/OBS select MixBridge directly without an external virtual cable.
 
 | Requirement | Status |
 |---|---|
@@ -27,4 +27,4 @@ A later signed Windows capture endpoint named **MixBridge Output** would let Dis
 
 A SysVAD-derived/open driver is not complete merely because it installs or is renamed. Actual MixBridge audio must reach the capture endpoint and the package must be production-signed.
 
-The first-party driver is therefore a separately gated post-V1 deliverable.
+The first-party driver is therefore a separately gated future deliverable and is not part of the current V1 acceptance claim.

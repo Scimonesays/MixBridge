@@ -21,7 +21,7 @@ See `artifacts/qa/latest/SUMMARY.md`.
 
 ## V1 automated release pipeline
 
-The `finish/mixbridge-release` GitHub Actions run is authoritative for merge readiness.
+`main` GitHub Actions is authoritative for release readiness. The V1 release-candidate baseline was proven green at commit `146acc2d`.
 
 | Gate | Required proof |
 |---|---|
@@ -48,7 +48,7 @@ The `finish/mixbridge-release` GitHub Actions run is authoritative for merge rea
 - portable bundled native engine sidecar
 - first-party starter instrument source with deterministic non-silence engine test and session restore
 
-## Final hardware smoke test before public release
+## Final hardware acceptance
 
 A cloud runner cannot certify the physical chain. On the target Windows machine verify:
 
