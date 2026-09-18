@@ -53,6 +53,7 @@ static const char* source_kind_name(mixbridge::SourceKind k) {
     case mixbridge::SourceKind::SystemLoopback: return "system";
     case mixbridge::SourceKind::ProcessLoopback: return "process";
     case mixbridge::SourceKind::ToneFixture: return "tone";
+    case mixbridge::SourceKind::StarterInstrument: return "instrument";
   }
   return "unknown";
 }
@@ -150,9 +151,9 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       for (const auto& s : sources) {
         char buf[512];
         std::snprintf(buf, sizeof(buf),
-                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d PROCESS %u FX_BYPASS %d FX_FAULT %d FX_EDITOR %d FX_DIRTY %d",
+                      "SOURCE ID %u KIND %s NAME %s GAIN %.4f MUTE %d MONITOR %d BROADCAST %d PROCESS %u PRESET %u FX_BYPASS %d FX_FAULT %d FX_EDITOR %d FX_DIRTY %d",
                       s.id, source_kind_name(s.kind), s.name.c_str(), s.gain, s.mute ? 1 : 0,
-                      s.monitor ? 1 : 0, s.broadcast ? 1 : 0, s.process_id,
+                      s.monitor ? 1 : 0, s.broadcast ? 1 : 0, s.process_id, s.instrument_preset,
                       s.effect_bypass ? 1 : 0, s.effect_faulted ? 1 : 0,
                       s.effect_editor_open ? 1 : 0, s.effect_dirty ? 1 : 0);
         std::string source_line(buf);
@@ -225,6 +226,31 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       iss >> hz;
       const auto id = engine.add_tone({.hz = hz, .name = "ipc-tone"}, err);
       if (id) write_line(pipe, "OK ID " + std::to_string(id));
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "ADD_INSTRUMENT") {
+      uint32_t preset = 0;
+      iss >> preset;
+      mixbridge::AddInstrumentRequest req{.preset = preset};
+      const auto id = engine.add_starter_instrument(req, err);
+      if (id) write_line(pipe, "OK ID " + std::to_string(id));
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "INSTRUMENT_NOTE_ON") {
+      uint32_t id = 0;
+      uint32_t note = 60;
+      float velocity = 0.8f;
+      iss >> id >> note >> velocity;
+      if (engine.instrument_note_on(id, note, velocity, err)) write_line(pipe, "OK");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "INSTRUMENT_NOTE_OFF") {
+      uint32_t id = 0;
+      uint32_t note = 60;
+      iss >> id >> note;
+      if (engine.instrument_note_off(id, note, err)) write_line(pipe, "OK");
+      else write_line(pipe, "ERR " + err);
+    } else if (cmd == "INSTRUMENT_NOTES_OFF") {
+      uint32_t id = 0;
+      iss >> id;
+      if (engine.instrument_all_notes_off(id, err)) write_line(pipe, "OK");
       else write_line(pipe, "ERR " + err);
     } else if (cmd == "ADD_PHYSICAL") {
       std::string id_utf8;

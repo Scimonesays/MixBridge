@@ -9,6 +9,7 @@ namespace mixbridge {
 inline constexpr uint32_t kEngineRate = 48000;
 inline constexpr uint32_t kEngineChannels = 2;
 inline constexpr uint32_t kMaxSources = 16;
+inline constexpr uint32_t kStarterVoices = 8;
 inline constexpr uint32_t kRingFrames = 1u << 14;  // samples (floats), power of two
 
 enum class EngineState : uint32_t {
@@ -51,6 +52,7 @@ enum class SourceKind : uint8_t {
   SystemLoopback = 1,
   ProcessLoopback = 2,
   ToneFixture = 3,
+  StarterInstrument = 4,
 };
 
 struct DeviceInfo {
@@ -94,6 +96,7 @@ struct SourceInfo {
   bool effect_faulted = false;
   bool effect_editor_open = false;
   bool effect_dirty = false;
+  uint32_t instrument_preset = 0;
 };
 
 }  // namespace mixbridge

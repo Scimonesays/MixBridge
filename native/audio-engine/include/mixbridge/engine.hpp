@@ -32,6 +32,11 @@ struct AddToneRequest {
   std::string name;
 };
 
+struct AddInstrumentRequest {
+  uint32_t preset = 0;  // 0 = Neon Keys, 1 = Soft Pad
+  std::string name;
+};
+
 class Engine {
 public:
   Engine();
@@ -64,6 +69,10 @@ public:
   uint32_t add_physical_capture(const AddPhysicalRequest& req, std::string& error);
   uint32_t add_process_loopback(const AddProcessRequest& req, std::string& error);
   uint32_t add_tone(const AddToneRequest& req, std::string& error);
+  uint32_t add_starter_instrument(const AddInstrumentRequest& req, std::string& error);
+  bool instrument_note_on(uint32_t id, uint32_t note, float velocity, std::string& error);
+  bool instrument_note_off(uint32_t id, uint32_t note, std::string& error);
+  bool instrument_all_notes_off(uint32_t id, std::string& error);
   bool remove_source(uint32_t id, std::string& error);
 
   bool set_gain(uint32_t id, float gain);

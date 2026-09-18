@@ -91,6 +91,7 @@ std::vector<SourceInfo> Engine::list_sources() const {
     info.process_id = slots_[i].process_id.load(std::memory_order_relaxed);
     info.effect_name = slots_[i].effect_name;
     info.effect_path = slots_[i].effect_path;
+    info.instrument_preset = slots_[i].instrument_preset.load(std::memory_order_relaxed);
     if (auto* effect_ptr = slots_[i].effect.load(std::memory_order_acquire)) {
       info.effect_bypass = effect_ptr->bypass();
       info.effect_faulted = effect_ptr->faulted();
@@ -153,6 +154,14 @@ void Engine::free_slot(int index) {
   slots_[index].device_id.clear();
   slots_[index].effect_name.clear();
   slots_[index].effect_path.clear();
+  slots_[index].instrument_preset.store(0, std::memory_order_relaxed);
+  slots_[index].instrument_next_voice.store(0, std::memory_order_relaxed);
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    slots_[index].instrument_voices[v].gate.store(false, std::memory_order_relaxed);
+    slots_[index].instrument_voices[v].note.store(-1, std::memory_order_relaxed);
+    slots_[index].instrument_voices[v].velocity.store(0.0f, std::memory_order_relaxed);
+    slots_[index].instrument_state[v] = {};
+  }
 }
 
 SourceSlot* Engine::slot_by_id(uint32_t id) {
@@ -273,6 +282,153 @@ uint32_t Engine::add_process_loopback(const AddProcessRequest& req, std::string&
     return 0;
   }
   return id;
+}
+
+uint32_t Engine::add_starter_instrument(
+  const AddInstrumentRequest& req,
+  std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  const int idx = alloc_slot();
+  if (idx < 0) {
+    error = "no free source slots";
+    return 0;
+  }
+  auto& slot = slots_[idx];
+  const uint32_t id = next_id_.fetch_add(1);
+  const uint32_t preset = std::min(req.preset, 1u);
+  slot.id.store(id);
+  slot.kind.store(static_cast<uint32_t>(SourceKind::StarterInstrument));
+  slot.effect.store(nullptr, std::memory_order_relaxed);
+  slot.instrument_preset.store(preset, std::memory_order_relaxed);
+  slot.instrument_next_voice.store(0, std::memory_order_relaxed);
+  slot.gain.store(1.0f);
+  slot.pan.store(0.0f);
+  slot.mute.store(false);
+  slot.solo.store(false);
+  slot.monitor.store(true);
+  slot.broadcast.store(true);
+  slot.process_id.store(0);
+  slot.name = req.name.empty()
+    ? (preset == 1 ? "Soft Pad" : "Neon Keys")
+    : req.name;
+  slot.ring.clear();
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    slot.instrument_voices[v].gate.store(false, std::memory_order_relaxed);
+    slot.instrument_voices[v].note.store(-1, std::memory_order_relaxed);
+    slot.instrument_voices[v].velocity.store(0.0f, std::memory_order_relaxed);
+    slot.instrument_state[v] = {};
+  }
+  slot.active.store(true, std::memory_order_release);
+  return id;
+}
+
+bool Engine::instrument_note_on(
+  uint32_t id, uint32_t note, float velocity, std::string& error) {
+  if (note > 127) {
+    error = "invalid_instrument_note";
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(control_mu_);
+  SourceSlot* slot = nullptr;
+  for (auto& candidate : slots_) {
+    if (candidate.active.load(std::memory_order_relaxed) &&
+        candidate.id.load(std::memory_order_relaxed) == id) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (!slot) {
+    error = "source not found";
+    return false;
+  }
+  if (static_cast<SourceKind>(slot->kind.load(std::memory_order_relaxed)) !=
+      SourceKind::StarterInstrument) {
+    error = "source is not an instrument";
+    return false;
+  }
+
+  int selected = -1;
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    if (slot->instrument_voices[v].gate.load(std::memory_order_relaxed) &&
+        slot->instrument_voices[v].note.load(std::memory_order_relaxed) ==
+          static_cast<int32_t>(note)) {
+      selected = static_cast<int>(v);
+      break;
+    }
+  }
+  if (selected < 0) {
+    for (uint32_t v = 0; v < kStarterVoices; ++v) {
+      if (!slot->instrument_voices[v].gate.load(std::memory_order_relaxed)) {
+        selected = static_cast<int>(v);
+        break;
+      }
+    }
+  }
+  if (selected < 0) {
+    selected = static_cast<int>(
+      slot->instrument_next_voice.fetch_add(1, std::memory_order_relaxed) % kStarterVoices);
+    slot->instrument_voices[selected].gate.store(false, std::memory_order_release);
+  }
+
+  auto& voice = slot->instrument_voices[selected];
+  voice.note.store(static_cast<int32_t>(note), std::memory_order_relaxed);
+  voice.velocity.store(std::clamp(velocity, 0.0f, 1.0f), std::memory_order_relaxed);
+  voice.gate.store(true, std::memory_order_release);
+  return true;
+}
+
+bool Engine::instrument_note_off(
+  uint32_t id, uint32_t note, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  SourceSlot* slot = nullptr;
+  for (auto& candidate : slots_) {
+    if (candidate.active.load(std::memory_order_relaxed) &&
+        candidate.id.load(std::memory_order_relaxed) == id) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (!slot) {
+    error = "source not found";
+    return false;
+  }
+  if (static_cast<SourceKind>(slot->kind.load(std::memory_order_relaxed)) !=
+      SourceKind::StarterInstrument) {
+    error = "source is not an instrument";
+    return false;
+  }
+  for (uint32_t v = 0; v < kStarterVoices; ++v) {
+    auto& voice = slot->instrument_voices[v];
+    if (voice.note.load(std::memory_order_relaxed) == static_cast<int32_t>(note)) {
+      voice.gate.store(false, std::memory_order_release);
+    }
+  }
+  return true;
+}
+
+bool Engine::instrument_all_notes_off(uint32_t id, std::string& error) {
+  std::lock_guard<std::mutex> lock(control_mu_);
+  SourceSlot* slot = nullptr;
+  for (auto& candidate : slots_) {
+    if (candidate.active.load(std::memory_order_relaxed) &&
+        candidate.id.load(std::memory_order_relaxed) == id) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (!slot) {
+    error = "source not found";
+    return false;
+  }
+  if (static_cast<SourceKind>(slot->kind.load(std::memory_order_relaxed)) !=
+      SourceKind::StarterInstrument) {
+    error = "source is not an instrument";
+    return false;
+  }
+  for (auto& voice : slot->instrument_voices) {
+    voice.gate.store(false, std::memory_order_release);
+  }
+  return true;
 }
 
 bool Engine::remove_source(uint32_t id, std::string& error) {
