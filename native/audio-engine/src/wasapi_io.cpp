@@ -19,6 +19,50 @@ using Microsoft::WRL::Make;
 namespace mixbridge {
 namespace {
 
+// Windows 10+ low-latency shared-mode path. IAudioClient3 lets a client request
+// the device/audio-engine's minimum supported shared period (often far smaller
+// than the legacy default period). If a driver or endpoint rejects it, callers
+// transparently fall back to IAudioClient::Initialize.
+HRESULT initialize_shared_stream_low_latency(
+  IAudioClient* client,
+  DWORD flags,
+  const WAVEFORMATEX* format,
+  REFERENCE_TIME fallback_period,
+  UINT32* selected_period_frames = nullptr) {
+  if (selected_period_frames) *selected_period_frames = 0;
+  if (!client || !format) return E_POINTER;
+
+  ComPtr<IAudioClient3> client3;
+  HRESULT hr3 = client->QueryInterface(IID_PPV_ARGS(&client3));
+  if (SUCCEEDED(hr3) && client3) {
+    UINT32 default_frames = 0;
+    UINT32 fundamental_frames = 0;
+    UINT32 min_frames = 0;
+    UINT32 max_frames = 0;
+    hr3 = client3->GetSharedModeEnginePeriod(
+      format,
+      &default_frames,
+      &fundamental_frames,
+      &min_frames,
+      &max_frames);
+    if (SUCCEEDED(hr3) && min_frames > 0) {
+      hr3 = client3->InitializeSharedAudioStream(flags, min_frames, format, nullptr);
+      if (SUCCEEDED(hr3)) {
+        if (selected_period_frames) *selected_period_frames = min_frames;
+        return hr3;
+      }
+    }
+  }
+
+  return client->Initialize(
+    AUDCLNT_SHAREMODE_SHARED,
+    flags,
+    fallback_period,
+    0,
+    format,
+    nullptr);
+}
+
 class ActivateHandler
   : public RuntimeClass<RuntimeClassFlags<ClassicCom>, FtmBase, IActivateAudioInterfaceCompletionHandler> {
 public:
@@ -220,7 +264,9 @@ bool WasapiCaptureSource::run_endpoint_capture(IMMDevice* device, bool loopback,
     flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
   }
 
-  hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, period, 0, use, nullptr);
+  UINT32 selected_period_frames = 0;
+  hr = initialize_shared_stream_low_latency(
+    client, flags, use, period, &selected_period_frames);
   if (FAILED(hr)) {
     error = "capture Initialize " + wasapi::hr_hex(hr);
     if (mix) CoTaskMemFree(mix);
@@ -397,7 +443,9 @@ bool WasapiRenderSink::open(IMMDevice* device, std::string& error) {
 
   REFERENCE_TIME period = 0;
   client_->GetDevicePeriod(&period, nullptr);
-  hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, period, 0, use, nullptr);
+  UINT32 selected_period_frames = 0;
+  hr = initialize_shared_stream_low_latency(
+    client_, flags, use, period, &selected_period_frames);
   if (FAILED(hr)) {
     error = "render Initialize " + wasapi::hr_hex(hr);
     close();
