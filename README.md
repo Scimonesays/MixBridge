@@ -32,9 +32,10 @@ A first-party signed endpoint named **MixBridge Output** is a separate Windows-d
 ## Product flow
 
 ```text
-Guitar / Mic ──► [ optional VST3, e.g. Guitar Rig ] ─┐
-Chrome / App ─────────────────────────────────────────┼─► Live Mix ─┬─► Headphones / RME
-Other source ─────────────────────────────────────────┘             └─► Live output ─► Discord
+Guitar Input 1 ─► [ optional VST3, e.g. Guitar Rig ] ─┐
+Voice Mic Input 2 ──────────────────────────────────────┤
+Chrome / App ───────────────────────────────────────────┼─► Live Mix ─┬─► Headphones / RME
+Other source ───────────────────────────────────────────┘             └─► Live output ─► Discord
 ```
 
 ## Platform
