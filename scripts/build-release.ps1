@@ -67,6 +67,23 @@ try {
     throw "The installer bundles the Release engine. Use -Configuration Release for packaging."
   }
 
+  # Tauri bundles the engine from build\Release. Multi-config generators (Visual Studio)
+  # naturally place it there, while single-config generators such as Ninja place the
+  # executable directly in the build root. Normalize both layouts so local builds and
+  # CI package the exact same resource path.
+  $ExpectedEngine = Join-Path $EngineBuild "Release\mb-engine-ipc.exe"
+  if (-not (Test-Path $ExpectedEngine)) {
+    $SingleConfigEngine = Join-Path $EngineBuild "mb-engine-ipc.exe"
+    if (-not (Test-Path $SingleConfigEngine)) {
+      throw "mb-engine-ipc.exe was built but could not be found in '$EngineBuild' or '$EngineBuild\Release'."
+    }
+
+    $ExpectedEngineDir = Split-Path -Parent $ExpectedEngine
+    New-Item -ItemType Directory -Force -Path $ExpectedEngineDir | Out-Null
+    Copy-Item -Force $SingleConfigEngine $ExpectedEngine
+    Write-Host "Staged single-config engine for Tauri bundle: $ExpectedEngine"
+  }
+
   Push-Location $Desktop
   try {
     npm ci
