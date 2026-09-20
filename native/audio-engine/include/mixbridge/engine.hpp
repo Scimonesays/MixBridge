@@ -20,6 +20,7 @@ namespace mixbridge {
 struct AddPhysicalRequest {
   std::wstring device_id;  // empty = default capture
   std::string name;
+  int32_t input_channel = -1;  // -1 = full endpoint; >=0 = mono channel duplicated to stereo
 };
 
 struct AddProcessRequest {
