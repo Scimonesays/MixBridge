@@ -252,6 +252,18 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
       iss >> id;
       if (engine.instrument_all_notes_off(id, err)) write_line(pipe, "OK");
       else write_line(pipe, "ERR " + err);
+    } else if (cmd == "ADD_PHYSICAL_CHANNEL") {
+      int32_t channel = -1;
+      iss >> channel;
+      std::string id_utf8;
+      std::getline(iss >> std::ws, id_utf8);
+      while (!id_utf8.empty() && (id_utf8.back() == ' ' || id_utf8.back() == '\t')) id_utf8.pop_back();
+      mixbridge::AddPhysicalRequest req;
+      req.device_id = utf8_to_wide(id_utf8);
+      req.input_channel = channel;
+      const auto id = engine.add_physical_capture(req, err);
+      if (id) write_line(pipe, "OK ID " + std::to_string(id));
+      else write_line(pipe, "ERR " + err);
     } else if (cmd == "ADD_PHYSICAL") {
       std::string id_utf8;
       std::getline(iss >> std::ws, id_utf8);
