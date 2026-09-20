@@ -22,7 +22,11 @@ public:
   WasapiCaptureSource(const WasapiCaptureSource&) = delete;
   WasapiCaptureSource& operator=(const WasapiCaptureSource&) = delete;
 
-  bool start_physical(IMMDevice* device, SourceSlot* slot, std::string& error);
+  bool start_physical(
+    IMMDevice* device,
+    SourceSlot* slot,
+    int32_t input_channel,
+    std::string& error);
   bool start_system_loopback(IMMDevice* render_device, SourceSlot* slot, std::string& error);
   bool start_process_loopback(uint32_t pid, SourceSlot* slot, std::string& error);
   void stop();
@@ -40,6 +44,7 @@ private:
   std::thread thread_;
   std::atomic<bool> stop_{false};
   std::atomic<bool> running_{false};
+  int32_t input_channel_ = -1;
   std::string last_error_;
 };
 
