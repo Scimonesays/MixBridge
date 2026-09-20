@@ -53,13 +53,14 @@ See `artifacts/qa/latest/SUMMARY.md`.
 A cloud runner cannot certify the physical chain. On the target Windows machine verify:
 
 ```text
-RME/guitar → MixBridge → Guitar Rig VST3
+RME Input 1/guitar → MixBridge → Guitar Rig VST3
+RME Input 2/voice mic → MixBridge clean source
 Chrome/YouTube → MixBridge
 MixBridge monitor → RME/headphones
 MixBridge Live → installed virtual endpoint → Discord input
 ```
 
-Confirm processed guitar + backing track, stable meters, no feedback loop, and correct Standby/On Air behavior.
+Confirm processed guitar + clean voice mic + backing track, stable independent meters, no feedback loop, and correct Standby/On Air behavior.
 
 ## First-party MixBridge Output driver
 
