@@ -85,6 +85,8 @@ struct SessionSourceDto {
   device_id: Option<String>,
   #[serde(default)]
   process_name: Option<String>,
+  #[serde(default)]
+  input_channel: Option<i32>,
   #[serde(default = "default_gain")]
   gain: f32,
   #[serde(default)]
@@ -609,9 +611,17 @@ fn engine_list_sources(app: tauri::AppHandle) -> Result<Vec<SourceDto>, String> 
 }
 
 #[tauri::command]
-fn engine_add_physical(app: tauri::AppHandle, device_id: String) -> Result<IdDto, String> {
+fn engine_add_physical(
+  app: tauri::AppHandle,
+  device_id: String,
+  input_channel: Option<i32>,
+) -> Result<IdDto, String> {
   ensure_running(&app)?;
-  parse_id(&pipe_command(&format!("ADD_PHYSICAL {device_id}"))?)
+  let command = match input_channel {
+    Some(channel) => format!("ADD_PHYSICAL_CHANNEL {channel} {device_id}"),
+    None => format!("ADD_PHYSICAL {device_id}"),
+  };
+  parse_id(&pipe_command(&command)?)
 }
 
 #[tauri::command]
