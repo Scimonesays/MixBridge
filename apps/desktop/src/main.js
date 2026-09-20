@@ -18,7 +18,7 @@ const instrumentKeys = document.getElementById("instrument-keys");
 const instrumentTitle = document.getElementById("instrument-title");
 const instrumentClose = document.getElementById("instrument-close");
 
-/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, processName?:string, instrumentPreset?:number, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string, effectEditorOpen?:boolean, effectDirty?:boolean}>} */
+/** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, inputChannel?:number|null, processName?:string, instrumentPreset?:number, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string, effectEditorOpen?:boolean, effectDirty?:boolean}>} */
 const sources = new Map();
 
 let onAir = false;
@@ -101,7 +101,10 @@ function normalizeProcessName(name) {
 }
 
 function sessionKey(s) {
-  if (s.kind === "physical") return "physical:" + (s.device_id || s.deviceId || s.name || "");
+  if (s.kind === "physical") {
+    const channel = s.input_channel ?? s.inputChannel ?? -1;
+    return "physical:" + (s.device_id || s.deviceId || s.name || "") + ":" + channel;
+  }
   if (s.kind === "process") return "process:" + normalizeProcessName(s.process_name || s.processName || s.name);
   return s.kind + ":" + (s.name || "");
 }
@@ -118,6 +121,7 @@ function sourceToSession(src) {
     name: src.name,
     device_id: src.deviceId || null,
     process_name: src.processName || null,
+    input_channel: Number.isInteger(src.inputChannel) ? src.inputChannel : null,
     gain: src.gain,
     mute: src.mute,
     monitor: src.monitor,
@@ -232,12 +236,16 @@ async function tryRestorePendingSources() {
             remaining.push(cfg);
             continue;
           }
-          const res = await invoke("engine_add_physical", { deviceId: device.id });
+          const res = await invoke("engine_add_physical", {
+            deviceId: device.id,
+            inputChannel: cfg.input_channel ?? null,
+          });
           await applySourceSettings(res.id, cfg);
           upsertSource({
             id: res.id,
             kind: "physical",
             name: cfg.name || device.name,
+            inputChannel: cfg.input_channel ?? null,
             gain: Number(cfg.gain ?? 1),
             mute: !!cfg.mute,
             monitor: cfg.monitor !== false,
@@ -335,6 +343,11 @@ function glyphForKind(kind) {
   return ICON.mic;
 }
 
+function sourceDisplayName(src) {
+  if (src.kind !== "physical" || !Number.isInteger(src.inputChannel)) return src.name;
+  return `${src.name} · Input ${src.inputChannel + 1}`;
+}
+
 function renderSources() {
   sourceList.innerHTML = "";
   for (const src of sources.values()) {
@@ -345,7 +358,7 @@ function renderSources() {
 
     card.innerHTML = `
       <div class="glyph">${glyphForKind(src.kind)}</div>
-      <div class="identity" title="${src.name}">${src.name}</div>
+      <div class="identity" title="${sourceDisplayName(src)}">${sourceDisplayName(src)}</div>
       <div class="meter-wrap" aria-hidden="true"><div class="meter source-meter" data-meter="${src.id}"></div></div>
       <div class="source-actions">
         <button type="button" class="icon-btn tiny btn-mute ${src.mute ? "danger active" : ""}" title="Mute" aria-label="Mute" aria-pressed="${src.mute}">${ICON.mute}</button>
@@ -439,6 +452,7 @@ function upsertSource(dto) {
     broadcast: dto.broadcast !== false,
     gain: typeof dto.gain === "number" ? dto.gain : 1,
     deviceId: dto.deviceId ?? previous.deviceId,
+    inputChannel: dto.input_channel ?? dto.inputChannel ?? previous.inputChannel ?? null,
     processName: dto.processName ?? previous.processName,
     instrumentPreset: dto.instrument_preset ?? dto.instrumentPreset ?? previous.instrumentPreset ?? 0,
     effectName: dto.effect_name ?? dto.effectName ?? previous.effectName ?? "",
@@ -643,6 +657,54 @@ window.addEventListener("keyup", async (ev) => {
   await instrumentNoteOff(note);
 });
 
+async function addPhysicalSource(device, inputChannel = null) {
+  try {
+    const res = await invoke("engine_add_physical", {
+      deviceId: device.id,
+      inputChannel,
+    });
+    upsertSource({
+      id: res.id,
+      kind: "physical",
+      name: device.name,
+      mute: false,
+      monitor: true,
+      broadcast: true,
+      gain: 1,
+      deviceId: device.id,
+      inputChannel,
+    });
+    renderSources();
+    scheduleSessionSave();
+    closePicker();
+    showError("");
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+function showPhysicalChannelList(device) {
+  pickerRoot.className = "pick-list";
+  pickerRoot.innerHTML = `<button type="button" class="icon-btn tiny pick-back" title="Back" aria-label="Back">${ICON.back}</button>`;
+  pickerRoot.querySelector(".pick-back").addEventListener("click", showPhysicalList);
+
+  const choices = [
+    { channel: null, label: "Full input / stereo pair" },
+    { channel: 0, label: "Input 1 · mono" },
+    { channel: 1, label: "Input 2 · mono" },
+  ];
+  for (const choice of choices) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "pick-row";
+    row.title = `${device.name} · ${choice.label}`;
+    row.setAttribute("aria-label", row.title);
+    row.innerHTML = `${ICON.mic}<span>${choice.label}</span>`;
+    row.addEventListener("click", () => addPhysicalSource(device, choice.channel));
+    pickerRoot.appendChild(row);
+  }
+}
+
 async function showPhysicalList() {
   pickerRoot.className = "pick-list";
   pickerRoot.innerHTML = `<button type="button" class="icon-btn tiny pick-back" title="Back" aria-label="Back">${ICON.back}</button>`;
@@ -656,27 +718,7 @@ async function showPhysicalList() {
       row.title = d.name;
       row.setAttribute("aria-label", d.name);
       row.innerHTML = `${ICON.mic}<span>${d.name}</span>`;
-      row.addEventListener("click", async () => {
-        try {
-          const res = await invoke("engine_add_physical", { deviceId: d.id });
-          upsertSource({
-            id: res.id,
-            kind: "physical",
-            name: d.name,
-            mute: false,
-            monitor: true,
-            broadcast: true,
-            gain: 1,
-            deviceId: d.id,
-          });
-          renderSources();
-          scheduleSessionSave();
-          closePicker();
-          showError("");
-        } catch (e) {
-          showError(String(e));
-        }
-      });
+      row.addEventListener("click", () => showPhysicalChannelList(d));
       pickerRoot.appendChild(row);
     }
   } catch (e) {
