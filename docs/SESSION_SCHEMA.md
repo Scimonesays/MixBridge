@@ -15,6 +15,7 @@ The product default is a quiet auto-save/auto-restore flow: source/device choice
       "kind": "physical",
       "device_id": "",
       "process_name": null,
+      "input_channel": 0,
       "name": "Fireface 1/2",
       "gain": 1.0,
       "mute": false,
@@ -43,6 +44,7 @@ The product default is a quiet auto-save/auto-restore flow: source/device choice
 Current behavior:
 - monitor and live destination IDs persist;
 - physical sources restore by endpoint ID, with friendly-name fallback;
+- physical sources may select a mono channel with `input_channel` (0 = Input 1, 1 = Input 2); `null` keeps the full endpoint;
 - application sources restore by process name and retry when the app starts later;
 - gain, mute, monitor route, and broadcast route persist;
 - the current VST3 insert path, bypass state, and full processor/controller snapshot persist;
