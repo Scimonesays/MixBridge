@@ -58,6 +58,7 @@ void push_packet_to_ring(
   const BYTE* data,
   UINT32 frames,
   UINT32 channels,
+  int32_t selected_channel,
   DWORD flags,
   bool is_float,
   UINT32 bits) {
@@ -73,18 +74,38 @@ void push_packet_to_ring(
     } else if (is_float && channels >= 1) {
       const float* f = reinterpret_cast<const float*>(data) + offset * channels;
       for (UINT32 i = 0; i < chunk; ++i) {
-        const float l = f[i * channels];
-        const float r = (channels > 1) ? f[i * channels + 1] : l;
-        tmp[i * 2] = l;
-        tmp[i * 2 + 1] = r;
+        if (selected_channel >= 0 && static_cast<UINT32>(selected_channel) < channels) {
+          const float mono = f[i * channels + static_cast<UINT32>(selected_channel)];
+          tmp[i * 2] = mono;
+          tmp[i * 2 + 1] = mono;
+        } else if (selected_channel >= 0) {
+          tmp[i * 2] = 0.0f;
+          tmp[i * 2 + 1] = 0.0f;
+        } else {
+          const float l = f[i * channels];
+          const float r = (channels > 1) ? f[i * channels + 1] : l;
+          tmp[i * 2] = l;
+          tmp[i * 2 + 1] = r;
+        }
       }
     } else if (bits == 16 && channels >= 1) {
       const int16_t* s = reinterpret_cast<const int16_t*>(data) + offset * channels;
       for (UINT32 i = 0; i < chunk; ++i) {
-        const float l = static_cast<float>(s[i * channels]) / 32768.0f;
-        const float r = (channels > 1) ? static_cast<float>(s[i * channels + 1]) / 32768.0f : l;
-        tmp[i * 2] = l;
-        tmp[i * 2 + 1] = r;
+        if (selected_channel >= 0 && static_cast<UINT32>(selected_channel) < channels) {
+          const float mono =
+            static_cast<float>(s[i * channels + static_cast<UINT32>(selected_channel)]) / 32768.0f;
+          tmp[i * 2] = mono;
+          tmp[i * 2 + 1] = mono;
+        } else if (selected_channel >= 0) {
+          tmp[i * 2] = 0.0f;
+          tmp[i * 2 + 1] = 0.0f;
+        } else {
+          const float l = static_cast<float>(s[i * channels]) / 32768.0f;
+          const float r =
+            (channels > 1) ? static_cast<float>(s[i * channels + 1]) / 32768.0f : l;
+          tmp[i * 2] = l;
+          tmp[i * 2 + 1] = r;
+        }
       }
     } else {
       for (UINT32 i = 0; i < samples; ++i) tmp[i] = 0.0f;
@@ -102,13 +123,18 @@ void push_packet_to_ring(
 
 WasapiCaptureSource::~WasapiCaptureSource() { stop(); }
 
-bool WasapiCaptureSource::start_physical(IMMDevice* device, SourceSlot* slot, std::string& error) {
+bool WasapiCaptureSource::start_physical(
+  IMMDevice* device,
+  SourceSlot* slot,
+  int32_t input_channel,
+  std::string& error) {
   if (!device || !slot) {
     error = "null device/slot";
     return false;
   }
   stop();
   slot_ = slot;
+  input_channel_ = input_channel;
   stop_.store(false);
   device->AddRef();
   thread_ = std::thread([this, device]() {
@@ -125,6 +151,7 @@ bool WasapiCaptureSource::start_system_loopback(IMMDevice* render_device, Source
   }
   stop();
   slot_ = slot;
+  input_channel_ = -1;
   stop_.store(false);
   render_device->AddRef();
   thread_ = std::thread([this, render_device]() {
@@ -141,6 +168,7 @@ bool WasapiCaptureSource::start_process_loopback(uint32_t pid, SourceSlot* slot,
   }
   stop();
   slot_ = slot;
+  input_channel_ = -1;
   stop_.store(false);
   thread_ = std::thread([this, pid]() { thread_main(Mode::ProcessLoopback, nullptr, pid); });
   return true;
@@ -229,7 +257,15 @@ bool WasapiCaptureSource::run_endpoint_capture(IMMDevice* device, bool loopback,
       UINT32 frames = 0;
       DWORD flags_pkt = 0;
       if (FAILED(capture->GetBuffer(&data, &frames, &flags_pkt, nullptr, nullptr))) break;
-      push_packet_to_ring(slot_, data, frames, channels, flags_pkt, is_float, bits);
+      push_packet_to_ring(
+        slot_,
+        data,
+        frames,
+        channels,
+        loopback ? -1 : input_channel_,
+        flags_pkt,
+        is_float,
+        bits);
       capture->ReleaseBuffer(frames);
     }
   }
@@ -314,7 +350,7 @@ bool WasapiCaptureSource::run_process_capture(uint32_t pid, std::string& error) 
       UINT32 frames = 0;
       DWORD flags_pkt = 0;
       if (FAILED(capture->GetBuffer(&data, &frames, &flags_pkt, nullptr, nullptr))) break;
-      push_packet_to_ring(slot_, data, frames, 2, flags_pkt, false, 16);
+      push_packet_to_ring(slot_, data, frames, 2, -1, flags_pkt, false, 16);
       capture->ReleaseBuffer(frames);
     }
   }
