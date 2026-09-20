@@ -242,7 +242,7 @@ uint32_t Engine::add_physical_capture(const AddPhysicalRequest& req, std::string
   slot.ring.clear();
   slot.active.store(true, std::memory_order_release);
 
-  if (!captures_[idx].start_physical(device, &slot, error)) {
+  if (!captures_[idx].start_physical(device, &slot, req.input_channel, error)) {
     slot.active.store(false);
     device->Release();
     return 0;
