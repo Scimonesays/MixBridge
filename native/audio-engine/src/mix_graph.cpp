@@ -109,7 +109,18 @@ void process_chunk(
       render_starter_instrument(slot, frames, src_buf);
     } else {
       const auto got = static_cast<uint32_t>(slot.ring.read(src_buf, need));
-      for (uint32_t i = got; i < need; ++i) src_buf[i] = 0.0f;
+      // A short read used to insert silence. One zero in every Guitar Rig
+      // block is a click, so hold the last sample across the gap.
+      float hold_l = 0.0f;
+      float hold_r = 0.0f;
+      if (got >= 2) {
+        hold_l = src_buf[got - 2];
+        hold_r = src_buf[got - 1];
+      }
+      for (uint32_t i = got; i + 1 < need; i += 2) {
+        src_buf[i] = hold_l;
+        src_buf[i + 1] = hold_r;
+      }
     }
 
     if (auto* effect = slot.effect.load(std::memory_order_acquire)) {

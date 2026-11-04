@@ -18,7 +18,7 @@ class Vst3RealtimeEffect final : public RealtimeEffect {
 public:
   bool open(const std::string& path, std::string& error) {
     if (!processor_.load(path, error)) return false;
-    return processor_.prepare(static_cast<double>(kEngineRate), 512, error);
+    return processor_.prepare(static_cast<double>(kEngineRate), 2048, error);
   }
 
   bool process(float* audio, uint32_t frames) noexcept override {

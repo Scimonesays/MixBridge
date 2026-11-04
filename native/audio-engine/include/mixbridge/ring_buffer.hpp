@@ -16,6 +16,9 @@ public:
   std::size_t size() const;
   std::size_t write(const float* data, std::size_t count);
   std::size_t read(float* data, std::size_t count);
+  // Consumer only. Throws away the oldest samples so a clock mismatch
+  // cannot turn the queue into hundreds of milliseconds of delay.
+  void drop_oldest_down_to(std::size_t keep);
   void clear();
 
 private:

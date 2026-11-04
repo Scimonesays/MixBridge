@@ -49,6 +49,13 @@ std::size_t SpscFloatRing::read(float* data, std::size_t count) {
   return n;
 }
 
+void SpscFloatRing::drop_oldest_down_to(std::size_t keep) {
+  const auto queued = size();
+  if (queued <= keep) return;
+  const auto t = tail_.load(std::memory_order_relaxed);
+  tail_.store(t + (queued - keep), std::memory_order_release);
+}
+
 void SpscFloatRing::clear() {
   tail_.store(head_.load(std::memory_order_relaxed), std::memory_order_relaxed);
 }

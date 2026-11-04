@@ -12,11 +12,13 @@
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -94,11 +96,15 @@ public:
   Steinberg::IPtr<Steinberg::IPlugView> view;
   HWND hwnd = nullptr;
   std::atomic<bool>* open_flag = nullptr;
+  bool attached = false;
+  bool resizing = false;
 
   Steinberg::tresult PLUGIN_API resizeView(
       Steinberg::IPlugView* candidate, Steinberg::ViewRect* size) override {
     if (!hwnd || !candidate || candidate != view.get() || !size)
       return Steinberg::kInvalidArgument;
+    if (resizing) return Steinberg::kResultFalse;
+    resizing = true;
     RECT wr{0, 0, size->right - size->left, size->bottom - size->top};
     const auto style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
     const auto exstyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
@@ -106,6 +112,7 @@ public:
     SetWindowPos(hwnd, nullptr, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     candidate->onSize(size);
+    resizing = false;
     return Steinberg::kResultTrue;
   }
   Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
@@ -145,13 +152,14 @@ LRESULT CALLBACK mixbridge_editor_proc(HWND hwnd, UINT message, WPARAM wParam, L
       DestroyWindow(hwnd);
       return 0;
     case WM_DESTROY:
-      if (frame->view) {
+      if (frame->view && frame->attached) {
         frame->view->setFrame(nullptr);
         frame->view->removed();
-        frame->view = nullptr;
       }
+      frame->view = nullptr;
+      frame->attached = false;
+      frame->hwnd = nullptr;
       if (frame->open_flag) frame->open_flag->store(false, std::memory_order_release);
-      PostQuitMessage(0);
       return 0;
     default:
       return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -173,6 +181,74 @@ bool register_mixbridge_editor_class(HINSTANCE instance) {
   });
   return result;
 }
+
+struct PluginUiTask {
+  std::function<void()> fn;
+  HANDLE done = nullptr;
+};
+
+HWND g_plugin_ui_hwnd = nullptr;
+DWORD g_plugin_ui_thread = 0;
+
+LRESULT CALLBACK plugin_ui_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+  if (message == WM_APP && lParam) {
+    auto* task = reinterpret_cast<PluginUiTask*>(lParam);
+    try {
+      if (task->fn) task->fn();
+    } catch (...) {
+    }
+    if (task->done) SetEvent(task->done);
+    return 0;
+  }
+  return DefWindowProcW(hwnd, message, wParam, lParam);
+}
+
+void ensure_plugin_ui() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::thread([ready] {
+      CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+      WNDCLASSEXW wc{};
+      wc.cbSize = sizeof(wc);
+      wc.lpfnWndProc = plugin_ui_proc;
+      wc.hInstance = GetModuleHandleW(nullptr);
+      wc.lpszClassName = L"MixBridgeVst3Ui";
+      RegisterClassExW(&wc);
+      g_plugin_ui_hwnd = CreateWindowExW(
+        0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+      g_plugin_ui_thread = GetCurrentThreadId();
+      SetEvent(ready);
+      MSG msg{};
+      while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+      CoUninitialize();
+    }).detach();
+    WaitForSingleObject(ready, INFINITE);
+    CloseHandle(ready);
+  });
+}
+
+bool plugin_ui_is_current() {
+  ensure_plugin_ui();
+  return GetCurrentThreadId() == g_plugin_ui_thread;
+}
+
+template <class Fn>
+void run_on_plugin_ui(Fn&& fn) {
+  if (plugin_ui_is_current()) {
+    fn();
+    return;
+  }
+  PluginUiTask task;
+  task.fn = std::forward<Fn>(fn);
+  task.done = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  PostMessageW(g_plugin_ui_hwnd, WM_APP, 0, reinterpret_cast<LPARAM>(&task));
+  WaitForSingleObject(task.done, INFINITE);
+  CloseHandle(task.done);
+}
 #endif
 
 }  // namespace
@@ -190,10 +266,10 @@ struct Processor::Impl {
   Steinberg::Vst::ParameterChangeTransfer ui_changes{0};
   std::atomic<bool> editor_state_dirty{false};
   ComponentHandler component_handler{ui_changes, editor_state_dirty};
-  std::thread editor_thread;
   std::atomic<bool> editor_is_open{false};
 #ifdef _WIN32
   std::atomic<HWND> editor_hwnd{nullptr};
+  EditorFrame editor_frame;
 #endif
 
   std::string module_path;
@@ -219,14 +295,16 @@ struct Processor::Impl {
 
   void close_editor() noexcept {
 #ifdef _WIN32
-    if (auto hwnd = editor_hwnd.load(std::memory_order_acquire))
-      PostMessageW(hwnd, WM_CLOSE, 0, 0);
-#endif
-    if (editor_thread.joinable()) editor_thread.join();
-#ifdef _WIN32
-    editor_hwnd.store(nullptr, std::memory_order_release);
-#endif
+    const HWND hwnd = editor_hwnd.exchange(nullptr, std::memory_order_acq_rel);
     editor_is_open.store(false, std::memory_order_release);
+    if (!hwnd || !IsWindow(hwnd)) return;
+    DWORD owner = 0;
+    const DWORD thread = GetWindowThreadProcessId(hwnd, &owner);
+    if (thread == GetCurrentThreadId()) DestroyWindow(hwnd);
+    else PostMessageW(hwnd, WM_CLOSE, 0, 0);
+#else
+    editor_is_open.store(false, std::memory_order_release);
+#endif
   }
 
   void reset() {
@@ -256,6 +334,16 @@ Processor::~Processor() {
 }
 
 bool Processor::load(const std::string& module_path, std::string& error) {
+#ifdef _WIN32
+  if (!plugin_ui_is_current()) {
+    bool ok_load = false;
+    std::string local;
+    const std::string path = module_path;
+    run_on_plugin_ui([&] { ok_load = load(path, local); });
+    error = std::move(local);
+    return ok_load;
+  }
+#endif
   unload();
   if (module_path.empty()) {
     error = "vst3_module_path_required";
@@ -328,10 +416,25 @@ bool Processor::load(const std::string& module_path, std::string& error) {
 }
 
 void Processor::unload() {
+#ifdef _WIN32
+  if (!plugin_ui_is_current()) {
+    run_on_plugin_ui([this] { unload(); });
+    return;
+  }
+#endif
   if (impl_) impl_->reset();
 }
 
 bool Processor::prepare(double sample_rate, uint32_t max_block_frames, std::string& error) {
+#ifdef _WIN32
+  if (!plugin_ui_is_current()) {
+    bool ok_prepare = false;
+    std::string local;
+    run_on_plugin_ui([&] { ok_prepare = prepare(sample_rate, max_block_frames, local); });
+    error = std::move(local);
+    return ok_prepare;
+  }
+#endif
   if (!loaded()) {
     error = "vst3_not_loaded";
     return false;
@@ -423,6 +526,15 @@ bool Processor::process(float* interleaved_stereo, uint32_t frames, std::string&
 bool Processor::save_state(std::vector<uint8_t>& component_state,
                            std::vector<uint8_t>& controller_state,
                            std::string& error) {
+#ifdef _WIN32
+  if (!plugin_ui_is_current()) {
+    bool ok_save = false;
+    std::string local;
+    run_on_plugin_ui([&] { ok_save = save_state(component_state, controller_state, local); });
+    error = std::move(local);
+    return ok_save;
+  }
+#endif
   component_state.clear();
   controller_state.clear();
   if (!loaded()) {
@@ -455,6 +567,15 @@ bool Processor::save_state(std::vector<uint8_t>& component_state,
 bool Processor::load_state(const std::vector<uint8_t>& component_state,
                            const std::vector<uint8_t>& controller_state,
                            std::string& error) {
+#ifdef _WIN32
+  if (!plugin_ui_is_current()) {
+    bool ok_load = false;
+    std::string local;
+    run_on_plugin_ui([&] { ok_load = load_state(component_state, controller_state, local); });
+    error = std::move(local);
+    return ok_load;
+  }
+#endif
   if (!loaded()) {
     error = "vst3_not_loaded";
     return false;
@@ -522,98 +643,161 @@ bool Processor::open_editor(std::string& error) {
   error = "vst3_editor_windows_only";
   return false;
 #else
+  if (!plugin_ui_is_current()) {
+    bool opened = false;
+    std::string local;
+    run_on_plugin_ui([&] { opened = open_editor(local); });
+    error = std::move(local);
+    return opened;
+  }
+  // Guitar Rig (Qt) creates its UI on the thread that loaded the plug-in.
+  // Opening the view on a side thread returns success and then never shows a window.
   if (!impl_->controller) {
     error = "vst3_editor_controller_missing";
     return false;
   }
   if (impl_->editor_is_open.load(std::memory_order_acquire)) {
-    if (auto hwnd = impl_->editor_hwnd.load(std::memory_order_acquire)) {
+    if (const auto hwnd = impl_->editor_hwnd.load(std::memory_order_acquire)) {
       ShowWindow(hwnd, SW_RESTORE);
+      SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+      SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
       SetForegroundWindow(hwnd);
     }
     return true;
   }
-  if (impl_->editor_thread.joinable()) impl_->editor_thread.join();
 
-  auto* controller = impl_->controller.get();
-  controller->addRef();
   const auto title = impl_->plugin_name.empty()
     ? std::string("MixBridge VST3")
     : impl_->plugin_name + " — MixBridge";
-  impl_->editor_is_open.store(true, std::memory_order_release);
+  auto view = Steinberg::owned(impl_->controller->createView(Steinberg::Vst::ViewType::kEditor));
+  if (!view) {
+    error = "plugin editor is unavailable";
+    return false;
+  }
+  if (view->isPlatformTypeSupported(Steinberg::kPlatformTypeHWND) != Steinberg::kResultTrue) {
+    error = "plugin editor does not support a Windows window";
+    return false;
+  }
 
-  impl_->editor_thread = std::thread([this, controller, title] {
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    auto view = Steinberg::owned(controller->createView(Steinberg::Vst::ViewType::kEditor));
-    if (!view ||
-        view->isPlatformTypeSupported(Steinberg::kPlatformTypeHWND) != Steinberg::kResultTrue) {
-      impl_->editor_is_open.store(false, std::memory_order_release);
-      controller->release();
-      CoUninitialize();
-      return;
+  Steinberg::ViewRect vr{};
+  int width = 1180;
+  int height = 760;
+  if (view->getSize(&vr) == Steinberg::kResultTrue) {
+    const int got_w = vr.right - vr.left;
+    const int got_h = vr.bottom - vr.top;
+    if (got_w >= 200 && got_h >= 120) {
+      width = got_w;
+      height = got_h;
     }
-    Steinberg::ViewRect vr{};
-    if (view->getSize(&vr) != Steinberg::kResultTrue) {
-      impl_->editor_is_open.store(false, std::memory_order_release);
-      controller->release();
-      CoUninitialize();
-      return;
-    }
+  }
+  RECT work{};
+  if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) {
+    const int max_w = work.right - work.left - 48;
+    const int max_h = work.bottom - work.top - 48;
+    if (max_w > 320 && width > max_w) width = max_w;
+    if (max_h > 240 && height > max_h) height = max_h;
+  }
 
-    const auto instance = GetModuleHandleW(nullptr);
-    if (!register_mixbridge_editor_class(instance)) {
-      impl_->editor_is_open.store(false, std::memory_order_release);
-      controller->release();
-      CoUninitialize();
-      return;
-    }
+  const auto instance = GetModuleHandleW(nullptr);
+  if (!register_mixbridge_editor_class(instance)) {
+    error = "editor window class failed";
+    return false;
+  }
 
-    EditorFrame frame;
-    frame.view = view;
-    frame.open_flag = &impl_->editor_is_open;
+  auto& frame = impl_->editor_frame;
+  frame.view = nullptr;
+  frame.hwnd = nullptr;
+  frame.open_flag = &impl_->editor_is_open;
+  frame.attached = false;
+  frame.resizing = false;
 
-    DWORD style = WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-    if (view->canResize() == Steinberg::kResultTrue) style |= WS_SIZEBOX | WS_MAXIMIZEBOX;
-    RECT wr{0, 0, vr.right - vr.left, vr.bottom - vr.top};
-    AdjustWindowRectEx(&wr, style, FALSE, WS_EX_APPWINDOW);
-    const auto wtitle = editor_title_wide(title);
-    const auto hwnd = CreateWindowExW(
-      WS_EX_APPWINDOW, L"MixBridgeVST3Editor", wtitle.c_str(), style,
-      CW_USEDEFAULT, CW_USEDEFAULT, wr.right - wr.left, wr.bottom - wr.top,
-      nullptr, nullptr, instance, &frame);
-    if (!hwnd) {
-      impl_->editor_is_open.store(false, std::memory_order_release);
-      controller->release();
-      CoUninitialize();
-      return;
-    }
-    impl_->editor_hwnd.store(hwnd, std::memory_order_release);
-    view->setFrame(&frame);
-    if (view->attached(hwnd, Steinberg::kPlatformTypeHWND) != Steinberg::kResultTrue) {
-      DestroyWindow(hwnd);
-      impl_->editor_hwnd.store(nullptr, std::memory_order_release);
-      impl_->editor_is_open.store(false, std::memory_order_release);
-      controller->release();
-      CoUninitialize();
-      return;
-    }
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
+  DWORD style = WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+  if (view->canResize() == Steinberg::kResultTrue) style |= WS_SIZEBOX | WS_MAXIMIZEBOX;
+  RECT wr{0, 0, width, height};
+  AdjustWindowRectEx(&wr, style, FALSE, WS_EX_APPWINDOW);
+  const auto wtitle = editor_title_wide(title);
+  const auto hwnd = CreateWindowExW(
+    WS_EX_APPWINDOW, L"MixBridgeVST3Editor", wtitle.c_str(), style,
+    CW_USEDEFAULT, CW_USEDEFAULT, wr.right - wr.left, wr.bottom - wr.top,
+    nullptr, nullptr, instance, &frame);
+  if (!hwnd) {
+    error = "editor window creation failed";
+    return false;
+  }
+
+  frame.view = view;
+  impl_->editor_hwnd.store(hwnd, std::memory_order_release);
+  view->setFrame(&frame);
+
+  Steinberg::IPlugViewContentScaleSupport* scale = nullptr;
+  if (ok(view->queryInterface(
+        Steinberg::IPlugViewContentScaleSupport::iid,
+        reinterpret_cast<void**>(&scale))) && scale) {
+    const UINT dpi = GetDpiForWindow(hwnd);
+    if (dpi >= 96) scale->setContentScaleFactor(static_cast<float>(dpi) / 96.0f);
+    scale->release();
+  }
+
+  ShowWindow(hwnd, SW_SHOW);
+  UpdateWindow(hwnd);
+  if (!ok(view->attached(hwnd, Steinberg::kPlatformTypeHWND))) {
+    frame.attached = false;
+    DestroyWindow(hwnd);
+    impl_->editor_hwnd.store(nullptr, std::memory_order_release);
+    frame.view = nullptr;
+    error = "plugin editor failed to attach";
+    return false;
+  }
+  frame.attached = true;
+
+  RECT client{};
+  GetClientRect(hwnd, &client);
+  Steinberg::ViewRect fitted{};
+  fitted.right = client.right - client.left;
+  fitted.bottom = client.bottom - client.top;
+  view->onSize(&fitted);
+
+  const DWORD shown_at = GetTickCount();
+  while (GetTickCount() - shown_at < 400) {
     MSG msg{};
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      if (msg.message == WM_QUIT) continue;
       TranslateMessage(&msg);
       DispatchMessageW(&msg);
     }
+    if (!IsWindow(hwnd)) break;
+    MsgWaitForMultipleObjects(0, nullptr, FALSE, 15, QS_ALLINPUT);
+  }
+
+  if (!IsWindow(hwnd)) {
     impl_->editor_hwnd.store(nullptr, std::memory_order_release);
-    impl_->editor_is_open.store(false, std::memory_order_release);
-    controller->release();
-    CoUninitialize();
-  });
+    error = "plugin editor closed during open";
+    return false;
+  }
+  GetClientRect(hwnd, &client);
+  if ((client.right - client.left) < 100 || (client.bottom - client.top) < 80) {
+    frame.attached = true;
+    DestroyWindow(hwnd);
+    impl_->editor_hwnd.store(nullptr, std::memory_order_release);
+    error = "plugin editor opened with an empty window";
+    return false;
+  }
+
+  SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+  SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+  SetForegroundWindow(hwnd);
+  impl_->editor_is_open.store(true, std::memory_order_release);
   return true;
 #endif
 }
 
 void Processor::close_editor() noexcept {
+#ifdef _WIN32
+  if (!plugin_ui_is_current()) {
+    run_on_plugin_ui([this] { close_editor(); });
+    return;
+  }
+#endif
   impl_->close_editor();
 }
 

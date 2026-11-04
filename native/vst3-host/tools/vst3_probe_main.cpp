@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     std::cerr << "usage: mb-vst3-probe <plugin.vst3>\n";
@@ -22,6 +26,28 @@ int main(int argc, char** argv) {
     std::cerr << "prepare_failed=" << error << "\n";
     return 4;
   }
+
+#ifdef _WIN32
+  if (argc >= 3 && std::string(argv[2]) == "--editor") {
+    if (!processor.open_editor(error)) {
+      std::cerr << "editor_failed=" << error << "\n";
+      return 6;
+    }
+    const DWORD shown = GetTickCount();
+    while (GetTickCount() - shown < 2500 && processor.editor_open()) {
+      MSG msg{};
+      while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+      Sleep(15);
+    }
+    const bool stayed_open = processor.editor_open();
+    std::cout << "editor_open=" << (stayed_open ? 1 : 0) << "\n";
+    processor.close_editor();
+    return stayed_open ? 0 : 7;
+  }
+#endif
 
   std::vector<float> block(512u * 2u);
   double input_energy = 0.0;

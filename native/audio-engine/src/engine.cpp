@@ -1045,6 +1045,16 @@ bool Engine::render_fill(float* dst, uint32_t frames) {
     return true;
   }
 
+  // One render callback plus a little jitter. A deeper queue is just delay
+  // on the monitored guitar. 30 ms still covers a shared-mode period.
+  const std::size_t cap =
+    static_cast<std::size_t>(kEngineRate) * 30u / 1000u * kEngineChannels;
+  for (uint32_t i = 0; i < kMaxSources; ++i) {
+    if (!slots_[i].active.load(std::memory_order_relaxed)) continue;
+    slots_[i].ring.drop_oldest_down_to(cap);
+  }
+  live_ring_.drop_oldest_down_to(cap);
+
   float* mon = scratch_monitor_.data();
   float* bc = scratch_broadcast_.data();
   graph_.process(slots_, frames, mon, bc, master_gain_.load(std::memory_order_relaxed), true);

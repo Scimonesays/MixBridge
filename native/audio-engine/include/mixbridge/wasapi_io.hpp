@@ -45,6 +45,13 @@ private:
   std::atomic<bool> stop_{false};
   std::atomic<bool> running_{false};
   int32_t input_channel_ = -1;
+  uint32_t capture_rate_ = 0;
+  // One-sample history so 44.1 kHz capture becomes 48 kHz without a long resampler.
+  double rate_pos_ = 0.0;
+  float rate_hist_l_ = 0.0f;
+  float rate_hist_r_ = 0.0f;
+  float rate_hold_[64]{};
+  uint32_t rate_hold_frames_ = 0;
   std::string last_error_;
 };
 
@@ -78,7 +85,14 @@ private:
   uint32_t device_rate_ = 0;
   uint32_t channels_ = 0;
   bool write_float_ = false;
+  bool write_pcm32_ = false;
+  bool exclusive_ = false;
   bool opened_ = false;
+  double rate_pos_ = 0.0;
+  float rate_hist_l_ = 0.0f;
+  float rate_hist_r_ = 0.0f;
+  float rate_hold_[64]{};
+  uint32_t rate_hold_frames_ = 0;
 };
 
 }  // namespace mixbridge
