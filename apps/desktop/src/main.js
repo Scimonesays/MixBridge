@@ -17,6 +17,12 @@ const instrumentDialog = document.getElementById("instrument-dialog");
 const instrumentKeys = document.getElementById("instrument-keys");
 const instrumentTitle = document.getElementById("instrument-title");
 const instrumentClose = document.getElementById("instrument-close");
+const btnSessions = document.getElementById("btn-sessions");
+const sessionDialog = document.getElementById("session-dialog");
+const sessionListEl = document.getElementById("session-list");
+const sessionNameInput = document.getElementById("session-name");
+const sessionSaveBtn = document.getElementById("session-save");
+const sessionCloseBtn = document.getElementById("session-close");
 
 /** @type {Map<number, {id:number, kind:string, name:string, mute:boolean, monitor:boolean, broadcast:boolean, gain:number, deviceId?:string, inputChannel?:number|null, processName?:string, instrumentPreset?:number, effectName?:string, effectPath?:string, effectBypass?:boolean, effectFaulted?:boolean, effectStateFile?:string, effectEditorOpen?:boolean, effectDirty?:boolean}>} */
 const sources = new Map();
@@ -32,6 +38,8 @@ let restoringSession = false;
 let restoreInFlight = false;
 let sessionSaveTimer = null;
 let pendingRestores = [];
+let activeSessionName = "";
+let trayPublishAt = 0;
 
 const ICON = {
   mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12z"/></svg>`,
@@ -143,7 +151,7 @@ function buildSession() {
   }
   return {
     version: 1,
-    name: "Discord Jam",
+    name: activeSessionName || "Last session",
     monitor_device_id: monitorDestId,
     live_device_id: liveDestId,
     sources: active,
@@ -165,8 +173,12 @@ async function captureEffectState(src) {
 
 async function saveSessionNow() {
   if (restoringSession) return;
+  const session = buildSession();
   try {
-    await invoke("session_save", { session: buildSession() });
+    await invoke("session_save", { session });
+    if (activeSessionName) {
+      await invoke("session_save_named", { name: activeSessionName, session });
+    }
   } catch (e) {
     console.warn("MixBridge session save failed", e);
   }
@@ -298,12 +310,24 @@ async function tryRestorePendingSources() {
   }
 }
 
-async function restoreLastSession() {
+async function clearSources() {
+  for (const id of [...sources.keys()]) {
+    try {
+      await invoke("engine_remove_source", { id });
+    } catch (e) {
+      console.warn("MixBridge source remove failed", e);
+    }
+    sources.delete(id);
+  }
+  pendingRestores = [];
+  renderSources();
+}
+
+async function applySession(session, replace) {
+  if (!session) return;
   restoringSession = true;
   try {
-    const session = await invoke("session_load");
-    if (!session) return;
-
+    if (replace) await clearSources();
     const renderDevices = await invoke("engine_list_render");
     if (session.monitor_device_id) {
       const monitor = renderDevices.find((d) => d.id === session.monitor_device_id);
@@ -330,11 +354,91 @@ async function restoreLastSession() {
 
     pendingRestores = Array.isArray(session.sources) ? session.sources.slice() : [];
     await tryRestorePendingSources();
+    renderSources();
   } catch (e) {
     console.warn("MixBridge session restore failed", e);
   } finally {
     restoringSession = false;
   }
+}
+
+async function restoreLastSession() {
+  try {
+    const session = await invoke("session_load");
+    if (!session) return;
+    const names = await invoke("session_list").catch(() => []);
+    activeSessionName = session.name && names.includes(session.name) ? session.name : "";
+    await applySession(session, false);
+  } catch (e) {
+    console.warn("MixBridge session restore failed", e);
+  }
+}
+
+async function loadNamedSession(name) {
+  const session = await invoke("session_load_named", { name });
+  if (!session) return;
+  activeSessionName = name;
+  session.name = name;
+  await applySession(session, true);
+  scheduleSessionSave();
+  publishTray(true);
+}
+
+async function renderSessionChoices() {
+  const names = await invoke("session_list");
+  sessionListEl.innerHTML = "";
+  if (!names.length) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "No saved sessions";
+    sessionListEl.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = "session-row";
+    const load = document.createElement("button");
+    load.type = "button";
+    load.className = "pick-row";
+    load.textContent = name;
+    load.title = name;
+    load.setAttribute("aria-label", `Load ${name}`);
+    if (name === activeSessionName) load.classList.add("selected");
+    load.addEventListener("click", async () => {
+      try {
+        await loadNamedSession(name);
+        sessionDialog.close();
+        showError("");
+      } catch (e) {
+        showError(String(e));
+      }
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-btn tiny ghost";
+    remove.title = "Delete session";
+    remove.setAttribute("aria-label", `Delete ${name}`);
+    remove.innerHTML = ICON.trash;
+    remove.addEventListener("click", async () => {
+      try {
+        await invoke("session_delete_named", { name });
+        if (activeSessionName === name) activeSessionName = "";
+        await renderSessionChoices();
+      } catch (e) {
+        showError(String(e));
+      }
+    });
+    row.appendChild(load);
+    row.appendChild(remove);
+    sessionListEl.appendChild(row);
+  }
+}
+
+async function openSessionDialog() {
+  sessionNameInput.value = activeSessionName || "";
+  await renderSessionChoices();
+  if (!sessionDialog.open) sessionDialog.showModal();
+  sessionNameInput.focus();
 }
 
 function glyphForKind(kind) {
@@ -964,36 +1068,18 @@ picker.addEventListener("click", (ev) => {
 
 btnLive.addEventListener("click", async () => {
   try {
+    await invoke("engine_ensure_running");
     if (onAir) {
       await invoke("broadcast_disable");
       setAirVisual(false);
       showError("");
       return;
     }
-    // Ensure monitor engine stays running; Go Live is broadcast-only.
-    await invoke("engine_ensure_running");
-    if (!liveDestReady) {
-      liveRoute.classList.add("attention");
-      await showLiveOutputList();
-      if (!picker.open) picker.showModal();
-      setTimeout(() => liveRoute.classList.remove("attention"), 1800);
-      return;
-    }
-    try {
-      await invoke("broadcast_enable");
-      setAirVisual(true);
-      showError("");
-    } catch (e) {
-      // No live destination yet (Phase 6) — remain Standby, do not fake On Air.
-      setAirVisual(false);
-      const msg = String(e);
-      if (msg.includes("no_live_destination")) {
-        showError("");
-      } else {
-        showError(msg);
-      }
-    }
+    await invoke("broadcast_enable");
+    setAirVisual(true);
+    showError("");
   } catch (e) {
+    setAirVisual(false);
     showError(String(e));
   }
 });
@@ -1055,12 +1141,14 @@ async function refreshStatus() {
     for (const src of sources.values()) {
       try {
         const sm = await invoke("engine_meter_source", { id: src.id });
+        src.peak = sm.peak;
         const el = sourceList.querySelector(`[data-meter="${src.id}"]`);
         if (el) setMeterWidth(el, sm.peak);
       } catch {
         /* ignore per-source meter misses */
       }
     }
+    publishTray(false);
 
     if (!statusEl.textContent.includes("no_live")) showError("");
   } catch (e) {
@@ -1073,11 +1161,96 @@ async function refreshStatus() {
   }
 }
 
+async function publishTray(force) {
+  const now = Date.now();
+  if (!force && now - trayPublishAt < 400) return;
+  trayPublishAt = now;
+  try {
+    await invoke("tray_snapshot", {
+      snapshot: {
+        onAir,
+        monitor: monitorDestName,
+        live: liveDestName,
+        sources: [...sources.values()].map((src) => ({
+          id: src.id,
+          name: sourceDisplayName(src),
+          mute: !!src.mute,
+          peak: src.peak || 0,
+        })),
+      },
+    });
+  } catch {
+    // The tray command is unavailable until the shell is ready.
+  }
+}
+
+async function bindTray() {
+  const { listen } = await import("@tauri-apps/api/event");
+  await listen("tray-load-session", async (event) => {
+    try {
+      await loadNamedSession(String(event.payload || ""));
+      showError("");
+    } catch (e) {
+      showError(String(e));
+    }
+  });
+  await listen("tray-sessions", () => {
+    openSessionDialog().catch((e) => showError(String(e)));
+  });
+  await listen("tray-toggle-mute", async (event) => {
+    const id = Number(event.payload);
+    const src = sources.get(id);
+    if (!src) return;
+    const next = !src.mute;
+    try {
+      await invoke("engine_set_mute", { id, mute: next });
+      src.mute = next;
+      renderSources();
+      scheduleSessionSave();
+      publishTray(true);
+    } catch (e) {
+      showError(String(e));
+    }
+  });
+  await listen("tray-error", (event) => {
+    showError(String(event.payload || ""));
+  });
+}
+
+btnSessions.addEventListener("click", () => {
+  openSessionDialog().catch((e) => showError(String(e)));
+});
+sessionCloseBtn.addEventListener("click", () => sessionDialog.close());
+sessionSaveBtn.addEventListener("click", async () => {
+  const name = sessionNameInput.value.trim();
+  if (!name) return;
+  const previous = activeSessionName;
+  activeSessionName = name;
+  const session = buildSession();
+  session.name = name;
+  try {
+    await invoke("session_save_named", { name, session });
+    await renderSessionChoices();
+    showError("");
+  } catch (e) {
+    activeSessionName = previous;
+    showError(String(e));
+  }
+});
+sessionNameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    sessionSaveBtn.click();
+  }
+});
+
 (async () => {
   try {
+    await bindTray();
     await invoke("engine_ensure_running");
     await syncSourcesFromEngine();
     await restoreLastSession();
+    publishTray(true);
   } catch (e) {
     showError(String(e));
   }

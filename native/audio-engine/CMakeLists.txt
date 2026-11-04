@@ -50,6 +50,10 @@ add_executable(mb-engine-ipc tools/engine_ipc_server.cpp)
 target_link_libraries(mb-engine-ipc PRIVATE mixbridge_engine_core)
 if(WIN32)
   target_link_libraries(mb-engine-ipc PRIVATE user32)
+  if(MSVC)
+    # No console window. main() stays the entry point.
+    target_link_options(mb-engine-ipc PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+  endif()
 endif()
 
 enable_testing()

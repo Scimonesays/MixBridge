@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -386,11 +387,50 @@ static void handle_client(mixbridge::Engine& engine, HANDLE pipe) {
 }
 
 int main() {
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
   mixbridge::Engine engine;
   std::string err;
   if (!engine.init(err)) {
     std::fprintf(stderr, "init failed: %s\n", err.c_str());
     return 1;
+  }
+
+  // Leave the Windows microphone alone. Discord and other apps keep hearing it
+  // whether or not that mic is a MixBridge source. MIXBRIDGE_FRIEND_GATE=1
+  // restores the old Standby mute of matching interface inputs.
+  wchar_t gate_env[8]{};
+  const DWORD gate_n = GetEnvironmentVariableW(L"MIXBRIDGE_FRIEND_GATE", gate_env, 8);
+  const bool friend_gate = gate_n > 0 && gate_env[0] == L'1';
+  engine.set_friend_gate(friend_gate);
+  if (!friend_gate) engine.release_legacy_input_mutes();
+
+  // If the desktop app is closed without SHUTDOWN, reopen the muted inputs.
+  DWORD parent_pid = 0;
+  {
+    const DWORD self = GetCurrentProcessId();
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+      PROCESSENTRY32W entry{};
+      entry.dwSize = sizeof(entry);
+      if (Process32FirstW(snap, &entry)) {
+        do {
+          if (entry.th32ProcessID == self) {
+            parent_pid = entry.th32ParentProcessID;
+            break;
+          }
+        } while (Process32NextW(snap, &entry));
+      }
+      CloseHandle(snap);
+    }
+  }
+  if (HANDLE parent = parent_pid ? OpenProcess(SYNCHRONIZE, FALSE, parent_pid) : nullptr) {
+    std::thread([parent, &engine]() {
+      WaitForSingleObject(parent, INFINITE);
+      CloseHandle(parent);
+      engine.shutdown();
+      ExitProcess(0);
+    }).detach();
   }
 
   // Developer-only live sink flag — never a production destination.

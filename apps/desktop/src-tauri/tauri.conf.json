@@ -12,13 +12,17 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "MixBridge",
         "width": 980,
         "height": 620,
         "resizable": true,
         "minWidth": 760,
         "minHeight": 500,
-        "center": true
+        "center": true,
+        "visible": false,
+        "focus": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

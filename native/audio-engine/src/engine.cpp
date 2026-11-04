@@ -3,11 +3,62 @@
 #include "mixbridge/wasapi_util.hpp"
 
 #include <windows.h>
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
 
 #include <algorithm>
 #include <cstring>
 
 namespace mixbridge {
+namespace {
+
+bool id_equal(const std::wstring& a, const std::wstring& b) {
+  return CompareStringOrdinal(a.c_str(), static_cast<int>(a.size()), b.c_str(),
+                              static_cast<int>(b.size()), TRUE) == CSTR_EQUAL;
+}
+
+std::wstring hardware_tag(const std::wstring& name) {
+  const auto end = name.rfind(L')');
+  if (end == std::wstring::npos || end == 0) return {};
+  const auto start = name.rfind(L'(', end);
+  if (start == std::wstring::npos || start + 1 >= end) return {};
+  return name.substr(start + 1, end - start - 1);
+}
+
+std::wstring default_console_capture_id() {
+  IMMDeviceEnumerator* enumerator = nullptr;
+  if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                              __uuidof(IMMDeviceEnumerator),
+                              reinterpret_cast<void**>(&enumerator))) ||
+      !enumerator) {
+    return {};
+  }
+  IMMDevice* device = nullptr;
+  const HRESULT hr = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
+  enumerator->Release();
+  if (FAILED(hr) || !device) return {};
+  const std::wstring id = wasapi::device_id_string(device);
+  device->Release();
+  return id;
+}
+
+bool endpoint_mute(IMMDevice* device, bool mute, bool* previous) {
+  if (!device) return false;
+  IAudioEndpointVolume* volume = nullptr;
+  const HRESULT hr = device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
+                                      reinterpret_cast<void**>(&volume));
+  if (FAILED(hr) || !volume) return false;
+  if (previous) {
+    BOOL current = FALSE;
+    volume->GetMute(&current);
+    *previous = current == TRUE;
+  }
+  const HRESULT set_hr = volume->SetMute(mute ? TRUE : FALSE, nullptr);
+  volume->Release();
+  return SUCCEEDED(set_hr);
+}
+
+}  // namespace
 
 Engine::Engine() = default;
 
@@ -248,6 +299,10 @@ uint32_t Engine::add_physical_capture(const AddPhysicalRequest& req, std::string
     return 0;
   }
   device->Release();
+  // Opening a capture stream can mute the Windows endpoint. Put the default
+  // microphone back unless the legacy friend gate is explicitly enabled.
+  refresh_friend_gate();
+  if (!friend_gate_) release_legacy_input_mutes();
   return id;
 }
 
@@ -474,6 +529,10 @@ bool Engine::remove_source(uint32_t id, std::string& error) {
       error = "source_removed_live_resume_failed:" + resume_error;
       return false;
     }
+  }
+  if (state() == EngineState::Running || state() == EngineState::Starting) {
+    refresh_friend_gate();
+    if (!friend_gate_) release_legacy_input_mutes();
   }
   return true;
 }
@@ -760,6 +819,141 @@ void Engine::set_live_destination_ready(bool ready) {
   }
 }
 
+void Engine::set_friend_gate(bool enabled) { friend_gate_ = enabled; }
+
+void Engine::release_legacy_input_mutes() {
+  auto* enumerator = devices_.enumerator();
+  if (!enumerator) return;
+  // The old Standby path muted these endpoints and could leave Discord silent.
+  // Open them whenever MixBridge is running without that behavior.
+  const ERole roles[] = {eConsole, eCommunications, eMultimedia};
+  for (ERole role : roles) {
+    IMMDevice* capture = nullptr;
+    if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, role, &capture)) && capture) {
+      endpoint_mute(capture, false, nullptr);
+      capture->Release();
+    }
+  }
+}
+
+bool Engine::live_shares_monitor(const std::wstring& live_id) const {
+  if (live_id.empty()) return true;
+  if (monitor_device_id_.empty()) {
+    IMMDevice* fallback = devices_.open_default(false);
+    if (!fallback) return false;
+    const auto id = wasapi::device_id_string(fallback);
+    fallback->Release();
+    return id_equal(id, live_id);
+  }
+  return id_equal(monitor_device_id_, live_id);
+}
+
+void Engine::restore_friend_mutes() {
+  for (const auto& saved : friend_mutes_) {
+    IMMDevice* device = devices_.open_by_id(saved.id);
+    if (!device) continue;
+    endpoint_mute(device, saved.was_muted, nullptr);
+    device->Release();
+  }
+  friend_mutes_.clear();
+}
+
+void Engine::refresh_friend_gate() {
+  if (!friend_gate_) {
+    restore_friend_mutes();
+    return;
+  }
+
+  const bool let_through = broadcast_state() == BroadcastState::Live;
+
+  std::vector<std::wstring> tags;
+  auto push_tag = [&](IMMDevice* device) {
+    if (!device) return;
+    const auto tag = hardware_tag(wasapi::device_friendly_name(device));
+    if (!tag.empty() && std::find(tags.begin(), tags.end(), tag) == tags.end()) tags.push_back(tag);
+    device->Release();
+  };
+
+  if (auto* enumerator = devices_.enumerator()) {
+    IMMDevice* def_render = nullptr;
+    if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &def_render))) {
+      push_tag(def_render);
+    }
+  }
+  if (!monitor_device_id_.empty()) push_tag(devices_.open_by_id(monitor_device_id_));
+  if (!live_device_id_.empty()) push_tag(devices_.open_by_id(live_device_id_));
+
+  // Discord listens to the default recording input. Close that even when it is
+  // also a MixBridge source. Other sources on the same interface stay open so
+  // the player can still hear them while Standby.
+  const std::wstring live_default = default_console_capture_id();
+  if (!live_default.empty()) {
+    for (const auto& cap : devices_.list_capture()) {
+      if (!id_equal(cap.id, live_default)) continue;
+      if (std::find(tags.begin(), tags.end(), hardware_tag(cap.name)) != tags.end()) {
+        discord_capture_id_ = live_default;
+      }
+      break;
+    }
+  }
+  const std::wstring& discord_input_id = discord_capture_id_;
+
+  std::vector<std::wstring> keep;
+  for (const auto& cap : devices_.list_capture()) {
+    if (hardware_tag(cap.name).empty()) continue;
+    if (std::find(tags.begin(), tags.end(), hardware_tag(cap.name)) == tags.end()) continue;
+    const bool discord_input = !discord_input_id.empty() && id_equal(cap.id, discord_input_id);
+    bool used_by_source = false;
+    for (const auto& slot : slots_) {
+      if (slot.active.load(std::memory_order_relaxed) && id_equal(slot.device_id, cap.id)) {
+        used_by_source = true;
+        break;
+      }
+    }
+    if (used_by_source && !discord_input) continue;
+    keep.push_back(cap.id);
+  }
+
+  std::vector<FriendMuteRecord> still;
+  for (const auto& saved : friend_mutes_) {
+    bool remains = false;
+    for (const auto& id : keep) {
+      if (id_equal(id, saved.id)) remains = true;
+    }
+    if (!remains) {
+      IMMDevice* device = devices_.open_by_id(saved.id);
+      if (device) {
+        endpoint_mute(device, saved.was_muted, nullptr);
+        device->Release();
+      }
+      continue;
+    }
+    still.push_back(saved);
+  }
+  friend_mutes_.swap(still);
+
+  for (const auto& id : keep) {
+    bool known = false;
+    for (const auto& saved : friend_mutes_) {
+      if (id_equal(saved.id, id)) known = true;
+    }
+    IMMDevice* device = devices_.open_by_id(id);
+    if (!device) continue;
+    if (!known) {
+      bool was = false;
+      if (endpoint_mute(device, !let_through, &was)) {
+        // Always reopen these inputs when MixBridge exits, so a crash cannot
+        // leave Discord's interface muted.
+        (void)was;
+        friend_mutes_.push_back(FriendMuteRecord{id, false});
+      }
+    } else {
+      endpoint_mute(device, !let_through, nullptr);
+    }
+    device->Release();
+  }
+}
+
 void Engine::stop_live_thread() {
   stop_live_.store(true, std::memory_order_release);
   if (live_thread_.joinable()) live_thread_.join();
@@ -780,7 +974,7 @@ bool Engine::live_fill(float* dst, uint32_t frames) {
 }
 
 bool Engine::enable_broadcast(std::string& error) {
-  if (!live_destination_ready()) {
+  if (!live_destination_ready() && !friend_gate_) {
     error = "no_live_destination";
     broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
     return false;
@@ -791,19 +985,25 @@ bool Engine::enable_broadcast(std::string& error) {
     return false;
   }
 
-  stop_live_thread();
-
   std::wstring device_id;
+  bool share_monitor = false;
   {
     std::lock_guard<std::mutex> lock(control_mu_);
-    if (broadcast_state() == BroadcastState::Live) return true;
     device_id = live_device_id_;
-    if (device_id.empty()) {
-      // Test helper: ready flag without sink.
-      broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Live), std::memory_order_release);
-      return true;
-    }
+    share_monitor = live_shares_monitor(device_id);
   }
+
+  // Same output the user already hears: the button only opens or closes the
+  // interface inputs. A second render stream would double that output.
+  if (share_monitor) {
+    stop_live_thread();
+    if (friend_gate_) live_destination_ready_.store(true, std::memory_order_release);
+    broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Live), std::memory_order_release);
+    refresh_friend_gate();
+    return true;
+  }
+
+  stop_live_thread();
 
   IMMDevice* device = devices_.open_by_id(device_id);
   if (!device) {
@@ -824,12 +1024,14 @@ bool Engine::enable_broadcast(std::string& error) {
     live_sink_.close();
   });
   broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Live), std::memory_order_release);
+  refresh_friend_gate();
   return true;
 }
 
 void Engine::disable_broadcast() {
   broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
   stop_live_thread();
+  refresh_friend_gate();
 }
 
 bool Engine::render_fill_thunk(void* user, float* dst, uint32_t frames) {
@@ -875,6 +1077,7 @@ bool Engine::start(std::string& error) {
   }
   set_state(EngineState::Starting);
   stop_render_.store(false);
+  if (discord_capture_id_.empty()) discord_capture_id_ = default_console_capture_id();
 
   IMMDevice* device = nullptr;
   if (monitor_device_id_.empty()) {
@@ -896,7 +1099,10 @@ bool Engine::start(std::string& error) {
   device->Release();
 
   // Ensure scratch covers buffer period.
-  const uint32_t need = std::max(monitor_sink_.buffer_frames(), 512u);
+  // Engine frames run at 48 kHz while the device period may be 44.1 kHz, so the
+  // scratch has to cover the longer of the two or the callback outputs silence.
+  const uint32_t device_frames = std::max(monitor_sink_.buffer_frames(), 512u);
+  const uint32_t need = device_frames + device_frames / 2u + 64u;
   if (need > scratch_frames_cap_) {
     scratch_frames_cap_ = need;
     scratch_monitor_.assign(static_cast<size_t>(need) * kEngineChannels, 0.0f);
@@ -919,14 +1125,18 @@ bool Engine::start(std::string& error) {
     }
   });
 
+  refresh_friend_gate();
+  if (!friend_gate_) release_legacy_input_mutes();
   return true;
 }
 
 void Engine::stop() {
-  disable_broadcast();
+  broadcast_state_.store(static_cast<uint32_t>(BroadcastState::Standby), std::memory_order_release);
+  stop_live_thread();
   stop_render_.store(true, std::memory_order_release);
   if (render_thread_.joinable()) render_thread_.join();
   monitor_sink_.close();
+  restore_friend_mutes();
   if (state() != EngineState::Failed && state() != EngineState::DeviceMissing) {
     set_state(EngineState::Stopped);
   }

@@ -59,6 +59,12 @@ html, body {
   padding: 0 0.15rem;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .logo {
   width: 52px;
   height: 52px;
@@ -644,3 +650,42 @@ html, body {
   .piano { height: 150px; }
   .piano-key span { display: none; }
 }
+
+.session-dialog::backdrop { background: rgba(4, 6, 10, 0.72); }
+.session-save-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.session-name {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border-radius: 11px;
+  border: 1px solid rgba(59, 184, 239, 0.16);
+  background: rgba(8, 10, 14, 0.55);
+  color: var(--text);
+  padding: 0 0.7rem;
+  font: inherit;
+}
+.session-name:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.session-text {
+  height: 36px;
+  padding: 0 0.85rem;
+  border-radius: 11px;
+  border: 1px solid rgba(59, 184, 239, 0.28);
+  background: #173044;
+  color: var(--text);
+  cursor: pointer;
+}
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  max-height: 280px;
+  overflow: auto;
+}
+.session-row { display: flex; align-items: center; gap: 0.4rem; }
+.session-row .pick-row { flex: 1; }
+.session-empty { color: var(--muted); font-size: 0.85rem; padding: 0.35rem 0.15rem; }

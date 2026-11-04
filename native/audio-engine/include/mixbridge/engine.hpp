@@ -109,6 +109,12 @@ public:
   }
   // Test helper only. Prefer set_live_device for product path.
   void set_live_destination_ready(bool ready);
+  // Optional legacy behavior. Off by default so Discord keeps the real microphone.
+  // MIXBRIDGE_FRIEND_GATE=1 mutes matching interface inputs while Standby.
+  void set_friend_gate(bool enabled);
+  // Opens the default recording devices. Previous builds muted them while
+  // Standby and Discord stopped hearing the microphone.
+  void release_legacy_input_mutes();
   bool enable_broadcast(std::string& error);
   void disable_broadcast();
 
@@ -132,6 +138,14 @@ private:
   void stop_live_thread();
   void on_device_invalidated();
   void set_state(EngineState s);
+  bool live_shares_monitor(const std::wstring& live_id) const;
+  void refresh_friend_gate();
+  void restore_friend_mutes();
+
+  struct FriendMuteRecord {
+    std::wstring id;
+    bool was_muted = false;
+  };
 
   DeviceManager devices_;
   SourceSlot slots_[kMaxSources];
@@ -156,6 +170,12 @@ private:
 
   std::wstring monitor_device_id_;
   std::wstring live_device_id_;
+  // Captured before the exclusive render stream opens. After that, asking
+  // Windows for the default input from this process can fail, and Standby
+  // would leave Discord's mic open.
+  std::wstring discord_capture_id_;
+  bool friend_gate_ = false;
+  std::vector<FriendMuteRecord> friend_mutes_;
   std::thread render_thread_;
   std::thread live_thread_;
   std::atomic<bool> stop_render_{false};

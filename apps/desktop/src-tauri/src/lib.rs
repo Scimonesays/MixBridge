@@ -8,12 +8,15 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
+mod tray;
+
 static ENGINE: Lazy<Mutex<EngineClient>> = Lazy::new(|| Mutex::new(EngineClient::default()));
 static VST3_CACHE: Lazy<Mutex<Option<Vec<PluginDto>>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Default)]
 struct EngineClient {
   child: Option<Child>,
+  owned: bool,
 }
 
 #[derive(Serialize)]
@@ -286,6 +289,35 @@ fn parse_id(raw: &str) -> Result<IdDto, String> {
   }
 }
 
+fn engine_pipe_open() -> bool {
+  #[cfg(windows)]
+  {
+    std::fs::OpenOptions::new()
+      .read(true)
+      .write(true)
+      .open(r"\\.\pipe\mixbridge-engine")
+      .is_ok()
+  }
+  #[cfg(not(windows))]
+  {
+    false
+  }
+}
+
+fn silence_leftover_engine() {
+  if !engine_pipe_open() {
+    return;
+  }
+  // The previous engine restores any Windows input mutes before it exits.
+  let _ = pipe_command("SHUTDOWN");
+  for _ in 0..25 {
+    if !engine_pipe_open() {
+      return;
+    }
+    std::thread::sleep(Duration::from_millis(100));
+  }
+}
+
 fn ensure_engine_process(app: &tauri::AppHandle) -> Result<(), String> {
   let mut eng = ENGINE.lock().map_err(|e| e.to_string())?;
   if let Some(child) = eng.child.as_mut() {
@@ -293,40 +325,47 @@ fn ensure_engine_process(app: &tauri::AppHandle) -> Result<(), String> {
       return Ok(());
     }
   }
+  if !eng.owned {
+    eng.owned = true;
+    silence_leftover_engine();
+  }
 
   let mut candidates = Vec::new();
   if let Some(override_path) = std::env::var_os("MIXBRIDGE_ENGINE_PATH") {
     candidates.push(PathBuf::from(override_path));
   }
+  let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+  let native_build = manifest_root
+    .join("..")
+    .join("..")
+    .join("..")
+    .join("native")
+    .join("audio-engine")
+    .join("build");
+  candidates.push(native_build.join("mb-engine-ipc.exe"));
+  candidates.push(native_build.join("Release").join("mb-engine-ipc.exe"));
   if let Ok(resource) = app.path().resource_dir() {
     candidates.push(resource.join("mb-engine-ipc.exe"));
   }
   if let Ok(cwd) = std::env::current_dir() {
-    candidates.push(cwd.join("native").join("audio-engine").join("build").join("Release").join("mb-engine-ipc.exe"));
     candidates.push(cwd.join("native").join("audio-engine").join("build").join("mb-engine-ipc.exe"));
+    candidates.push(cwd.join("native").join("audio-engine").join("build").join("Release").join("mb-engine-ipc.exe"));
   }
-  let manifest_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-  candidates.push(
-    manifest_root
-      .join("..")
-      .join("..")
-      .join("..")
-      .join("native")
-      .join("audio-engine")
-      .join("build")
-      .join("Release")
-      .join("mb-engine-ipc.exe"),
-  );
 
   let mut started = None;
   for c in candidates {
     if c.exists() {
-      let child = Command::new(&c)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("spawn ipc: {e}"))?;
+      let mut cmd = Command::new(&c);
+      cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+      #[cfg(windows)]
+      {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+        if std::env::var_os("MIXBRIDGE_FRIEND_GATE").is_none() {
+          cmd.env("MIXBRIDGE_FRIEND_GATE", "0");
+        }
+      }
+      let child = cmd.spawn().map_err(|e| format!("spawn ipc: {e}"))?;
       started = Some(child);
       break;
     }
@@ -340,6 +379,7 @@ fn ensure_engine_process(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn force_respawn(app: &tauri::AppHandle) -> Result<(), String> {
+  let _ = pipe_command("SHUTDOWN");
   {
     let mut eng = ENGINE.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = eng.child.take() {
@@ -347,6 +387,7 @@ fn force_respawn(app: &tauri::AppHandle) -> Result<(), String> {
       let _ = child.wait();
     }
   }
+  std::thread::sleep(Duration::from_millis(200));
   ensure_engine_process(app)
 }
 
@@ -822,6 +863,27 @@ fn session_save(app: tauri::AppHandle, session: SessionDto) -> Result<(), String
 #[tauri::command]
 fn session_load(app: tauri::AppHandle) -> Result<Option<SessionDto>, String> {
   let path = session_path(&app)?;
+  read_session_file(&path)
+}
+
+fn sanitize_session_name(name: &str) -> Result<String, String> {
+  let name = name.trim();
+  if name.is_empty() || name.chars().count() > 80 {
+    return Err("invalid_session_name".into());
+  }
+  if name.chars().any(|c| matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control()) {
+    return Err("invalid_session_name".into());
+  }
+  Ok(name.to_string())
+}
+
+fn sessions_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let dir = app.path().app_config_dir().map_err(|e| e.to_string())?.join("sessions");
+  fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir)
+}
+
+fn read_session_file(path: &Path) -> Result<Option<SessionDto>, String> {
   let data = match fs::read(path) {
     Ok(data) => data,
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -834,8 +896,72 @@ fn session_load(app: tauri::AppHandle) -> Result<Option<SessionDto>, String> {
   Ok(Some(session))
 }
 
+fn write_session_file(path: &Path, session: &SessionDto) -> Result<(), String> {
+  if session.version != 1 {
+    return Err(format!("unsupported_session_version_{}", session.version));
+  }
+  let data = serde_json::to_vec_pretty(session).map_err(|e| e.to_string())?;
+  fs::write(path, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn session_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+  let dir = sessions_dir(&app)?;
+  let mut names = Vec::new();
+  for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+    let path = entry.path();
+    let is_json = path
+      .extension()
+      .and_then(|ext| ext.to_str())
+      .map(|ext| ext.eq_ignore_ascii_case("json"))
+      .unwrap_or(false);
+    if !is_json {
+      continue;
+    }
+    if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) {
+      names.push(name.to_string());
+    }
+  }
+  names.sort_by_key(|name| name.to_lowercase());
+  Ok(names)
+}
+
+#[tauri::command]
+fn session_save_named(app: tauri::AppHandle, name: String, session: SessionDto) -> Result<(), String> {
+  let name = sanitize_session_name(&name)?;
+  let mut session = session;
+  session.name = name.clone();
+  let path = sessions_dir(&app)?.join(format!("{name}.json"));
+  write_session_file(&path, &session)?;
+  write_session_file(&session_path(&app)?, &session)
+}
+
+#[tauri::command]
+fn session_load_named(app: tauri::AppHandle, name: String) -> Result<Option<SessionDto>, String> {
+  let name = sanitize_session_name(&name)?;
+  let path = sessions_dir(&app)?.join(format!("{name}.json"));
+  read_session_file(&path)
+}
+
+#[tauri::command]
+fn session_delete_named(app: tauri::AppHandle, name: String) -> Result<(), String> {
+  let name = sanitize_session_name(&name)?;
+  let path = sessions_dir(&app)?.join(format!("{name}.json"));
+  match fs::remove_file(path) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(e.to_string()),
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  if !tray::claim_singleton() {
+    tray::signal_show();
+    return;
+  }
+  tray::create_show_event();
+
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .invoke_handler(tauri::generate_handler![
@@ -875,8 +1001,36 @@ pub fn run() {
       engine_set_monitor,
       engine_set_broadcast,
       session_save,
-      session_load
+      session_load,
+      session_list,
+      session_save_named,
+      session_load_named,
+      session_delete_named,
+      tray::tray_snapshot
     ])
-    .run(tauri::generate_context!())
-    .expect("error while running MixBridge");
+    .setup(|app| {
+      if let Some(window) = app.get_webview_window("main") {
+        let hidden = window.clone();
+        let app_handle = app.handle().clone();
+        window.on_window_event(move |event| {
+          if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            tray::hide_mixer(&app_handle);
+            let _ = hidden.hide();
+          }
+        });
+      }
+      tray::boot_autostart(app.handle());
+      tray::install(app)?;
+      tray::listen_for_show(app.handle().clone());
+      tray::keep_tray_until_requested(app.handle().clone());
+      Ok(())
+    })
+    .build(tauri::generate_context!())
+    .expect("error while running MixBridge")
+    .run(|_app, event| {
+      if let tauri::RunEvent::ExitRequested { .. } = event {
+        let _ = pipe_command("SHUTDOWN");
+      }
+    });
 }
