@@ -1,0 +1,12 @@
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Driver Kit Root Dev17 Content-x86_en-us.msi
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\build
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\Catalogs
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\build\10.0.26100.0
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\build\10.0.26100.0\bin
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\build\10.0.26100.0\bin\Microsoft.DriverKit.Build.Tasks.17.0.dll
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\build\10.0.26100.0\bin\Microsoft.DriverKit.Build.Tasks.PackageVerifier.17.0.dll
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\Catalogs\cat6ee77948548846299e843b0e70cb1361.cat
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\Catalogs\catbdf46d7c5bae49f0dd31295dada16f59.cat
+C:\Users\scimo\Documents\CODE\MixBridge\artifacts\qa\latest\wdk-dev17\Windows Kits\10\Catalogs\catde39c40d8c1503ab3e95138312e3c275.cat

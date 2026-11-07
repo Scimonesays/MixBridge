@@ -75,3 +75,23 @@ tests/fixtures/generated/
 native/mixbridge-send/build-test/
 native/mixbridge-send/build/
 native/driver/**/RC*
+
+# Local WDK/MSBuild overlays and driver build outputs (machine-specific)
+native/driver/msbuild-vc/
+native/driver/msbuild-vc-base/
+native/driver/x64/
+native/driver/**/x64/
+artifacts/qa/latest/wdk-nuget/
+artifacts/qa/latest/wdk-dev17/
+artifacts/qa/latest/wdk-dev17-full/
+artifacts/qa/latest/wdk-layout/
+artifacts/qa/latest/WDK.vsix
+artifacts/qa/latest/wdksetup.exe
+artifacts/qa/latest/*.disabled
+artifacts/qa/latest/elev-*.ps1
+artifacts/qa/latest/*reboot*.ps1
+artifacts/qa/latest/reenable-driver.ps1
+artifacts/qa/latest/repair-device.ps1
+artifacts/qa/latest/fix-device.ps1
+artifacts/qa/latest/driver-*.ps1
+artifacts/qa/latest/stop-reboot-loop.ps1

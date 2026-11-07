@@ -22,6 +22,7 @@ Abstract:
 #include "definitions.h"
 #include "endpoints.h"
 #include "minipairs.h"
+#include "cable_ring.h"
 
 typedef void (*fnPcDriverUnload) (PDRIVER_OBJECT);
 fnPcDriverUnload gPCDriverUnloadRoutine = NULL;
@@ -97,6 +98,7 @@ Environment:
 
     DPF(D_TERSE, ("[DriverUnload]"));
 
+    MixBridgeCableRingTeardown();
     ReleaseRegistryStringBuffer();
 
     if (DriverObject == NULL)
@@ -324,6 +326,12 @@ Return Value:
         DPF(D_ERROR, ("Registry Configuration error 0x%x", ntStatus)),
         Done);
 
+    ntStatus = MixBridgeCableRingInitialize();
+    IF_FAILED_ACTION_JUMP(
+        ntStatus,
+        DPF(D_ERROR, ("MixBridge cable ring init failed, 0x%x", ntStatus)),
+        Done);
+
     //
     // Tell the class driver to initialize the driver.
     //
@@ -355,6 +363,7 @@ Done:
 
     if (!NT_SUCCESS(ntStatus))
     {
+        MixBridgeCableRingTeardown();
         if (WdfGetDriver() != NULL)
         {
             WdfDriverMiniportUnload(WdfGetDriver());

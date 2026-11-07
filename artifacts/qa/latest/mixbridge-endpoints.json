@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-11-06T20:01:53-05:00",
+  "live_device_id": "{0.0.0.00000000}.{a996b872-b5d3-4815-a16f-eefcfb180410}",
+  "live_device_name": "Speakers (MixBridge Virtual Audio)",
+  "capture_device_id": "{0.0.1.00000000}.{2f818797-c1d9-489c-bf70-397357bb8c69}",
+  "capture_device_name": "Microphone Array (MixBridge Virtual Audio)",
+  "discord_input_device": "Microphone Array (MixBridge Virtual Audio)",
+  "status": "OK STATE running BROADCAST live LIVE_DEST 1",
+  "meter_broadcast": "OK PEAK 0.099668 RMS 0.070130 CLIP 0",
+  "render_peak": 0.1,
+  "driver_status": "OK",
+  "service": "MixBridgeDriver RUNNING"
+}

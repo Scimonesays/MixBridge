@@ -4,6 +4,7 @@
 #include "endpoints.h"
 #include "minwavert.h"
 #include "minwavertstream.h"
+#include "cable_ring.h"
 #define MINWAVERTSTREAM_POOLTAG 'SRWM'
 
 #pragma warning (disable : 4127)
@@ -1332,12 +1333,11 @@ VOID CMiniportWaveRTStream::UpdatePosition
 
     if (m_bCapture)
     {
-        // Write sine wave to buffer.
+        // MixBridge Output: pull Live PCM from the soft cable into capture DMA.
         WriteBytes(ByteDisplacement);
     }
     else
     {
-
         if (m_bEoSReceived)
         {
             // since EoS flag is set, we'll need to make sure not to read data beyond EOS position.
@@ -1364,11 +1364,8 @@ VOID CMiniportWaveRTStream::UpdatePosition
             m_bLastBufferRendered = TRUE;
         }
 
-        if (!g_DoNotCreateDataFiles)
-        {
-            // Read from buffer and write to a file.
-            ReadBytes(ByteDisplacement);
-        }
+        // MixBridge Input: push rendered Live PCM into the soft cable for Output.
+        ReadBytes(ByteDisplacement);
     }
     
     // Increment the DMA position by the number of bytes displaced since the last
@@ -1397,25 +1394,19 @@ VOID CMiniportWaveRTStream::WriteBytes
 
 Routine Description:
 
-This function writes the audio buffer using silence instead of a tone generator
-
-Arguments:
-
-ByteDisplacement - # of bytes to process.
+  Capture path (MixBridge Output): fill DMA from the Input→Output cable.
 
 --*/
 {
-    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
+    if (!m_pDmaBuffer || m_ulDmaBufferSize == 0 || ByteDisplacement == 0) {
+        return;
+    }
 
-    // Normally this will loop no more than once for a single wrap, but if
-    // many bytes have been displaced then this may loops many times.
+    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        
-        // Instead of generating a tone, just output silence
-        RtlZeroMemory(m_pDmaBuffer + bufferOffset, runWrite);
-           	
+        MixBridgeCableRingRead(m_pDmaBuffer + bufferOffset, runWrite);
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }
@@ -1431,22 +1422,19 @@ VOID CMiniportWaveRTStream::ReadBytes
 
 Routine Description:
 
-This function reads the audio buffer and saves the data in a file.
-
-Arguments:
-
-ByteDisplacement - # of bytes to process.
+  Render path (MixBridge Input): copy DMA into the Input→Output cable.
 
 --*/
 {
-    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
+    if (!m_pDmaBuffer || m_ulDmaBufferSize == 0 || ByteDisplacement == 0) {
+        return;
+    }
 
-    // Normally this will loop no more than once for a single wrap, but if
-    // many bytes have been displaced then this may loops many times.
+    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
+        MixBridgeCableRingWrite(m_pDmaBuffer + bufferOffset, runWrite);
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }

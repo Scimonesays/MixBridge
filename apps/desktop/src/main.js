@@ -40,6 +40,8 @@ let sessionSaveTimer = null;
 let pendingRestores = [];
 let activeSessionName = "";
 let trayPublishAt = 0;
+/** @type {Map<number, {mute?:boolean, monitor?:boolean, broadcast?:boolean, gain?:number}>} */
+const pendingSourcePatches = new Map();
 
 const ICON = {
   mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3zm-7 9a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.07A7 7 0 0 1 5 12z"/></svg>`,
@@ -323,6 +325,44 @@ async function clearSources() {
   renderSources();
 }
 
+function isMixBridgeInputDevice(device) {
+  const name = String(device?.name || "");
+  // INF name is "MixBridge Input"; Windows often shows "Speakers (MixBridge Virtual Audio)".
+  if (!/mixbridge/i.test(name)) return false;
+  if (/microphone|mic\s*array|mixbridge\s*output|capture/i.test(name)) return false;
+  return /mixbridge\s*input|speakers\s*\(.*mixbridge|mixbridge\s*virtual\s*audio/i.test(name);
+}
+
+function discordHintForLive(name) {
+  if (isMixBridgeInputDevice({ name })) {
+    return "Discord mic: choose MixBridge Output (or Microphone Array · MixBridge)";
+  }
+  return "";
+}
+
+async function selectLiveDevice(device, { persist = true } = {}) {
+  if (!device?.id) return false;
+  await invoke("engine_set_live_device", { deviceId: device.id });
+  liveDestId = device.id;
+  liveDestName = device.name;
+  liveDestReady = true;
+  liveRouteLabel.textContent = device.name;
+  liveRoute.title = `Live · ${device.name}`;
+  liveRoute.classList.remove("unavailable", "attention");
+  const hint = discordHintForLive(device.name);
+  showError(hint);
+  if (persist) scheduleSessionSave();
+  return true;
+}
+
+async function preferMixBridgeLive(renderDevices) {
+  const list = Array.isArray(renderDevices) ? renderDevices : await invoke("engine_list_render");
+  const mb = list.find(isMixBridgeInputDevice);
+  if (!mb) return false;
+  if (liveDestId && liveDestId === mb.id && liveDestReady) return true;
+  return selectLiveDevice(mb);
+}
+
 async function applySession(session, replace) {
   if (!session) return;
   restoringSession = true;
@@ -340,16 +380,16 @@ async function applySession(session, replace) {
       }
     }
 
+    let liveApplied = false;
     if (session.live_device_id) {
       const live = renderDevices.find((d) => d.id === session.live_device_id);
       if (live) {
-        await invoke("engine_set_live_device", { deviceId: live.id });
-        liveDestId = live.id;
-        liveDestName = live.name;
-        liveDestReady = true;
-        liveRouteLabel.textContent = live.name;
-        liveRoute.title = "Live · " + live.name;
+        await selectLiveDevice(live, { persist: false });
+        liveApplied = true;
       }
+    }
+    if (!liveApplied) {
+      await preferMixBridgeLive(renderDevices);
     }
 
     pendingRestores = Array.isArray(session.sources) ? session.sources.slice() : [];
@@ -486,45 +526,62 @@ function renderSources() {
     });
 
     card.querySelector(".btn-mute").addEventListener("click", async () => {
-      const next = !src.mute;
+      const current = sources.get(src.id) || src;
+      const next = !current.mute;
+      beginSourcePatch(src.id, { mute: next });
+      renderSources();
       try {
         await invoke("engine_set_mute", { id: src.id, mute: next });
-        src.mute = next;
-        renderSources();
+        endSourcePatch(src.id, { mute: next });
         scheduleSessionSave();
       } catch (e) {
+        endSourcePatch(src.id, { mute: next });
+        patchSource(src.id, { mute: !next });
+        renderSources();
         showError(String(e));
       }
     });
     card.querySelector(".gain").addEventListener("input", async (ev) => {
       const gain = Number(ev.target.value) / 100;
-      src.gain = gain;
+      beginSourcePatch(src.id, { gain });
       try {
         await invoke("engine_set_gain", { id: src.id, gain });
+        endSourcePatch(src.id, { gain });
         scheduleSessionSave();
       } catch (e) {
+        endSourcePatch(src.id, { gain });
         showError(String(e));
       }
     });
     card.querySelector(".btn-mon").addEventListener("click", async () => {
-      const next = !src.monitor;
+      const current = sources.get(src.id) || src;
+      const next = !current.monitor;
+      beginSourcePatch(src.id, { monitor: next });
+      renderSources();
       try {
         await invoke("engine_set_monitor", { id: src.id, enabled: next });
-        src.monitor = next;
-        renderSources();
+        endSourcePatch(src.id, { monitor: next });
         scheduleSessionSave();
       } catch (e) {
+        endSourcePatch(src.id, { monitor: next });
+        patchSource(src.id, { monitor: !next });
+        renderSources();
         showError(String(e));
       }
     });
     card.querySelector(".btn-bc").addEventListener("click", async () => {
-      const next = !src.broadcast;
+      const current = sources.get(src.id) || src;
+      const next = !current.broadcast;
+      beginSourcePatch(src.id, { broadcast: next });
+      renderSources();
       try {
         await invoke("engine_set_broadcast", { id: src.id, enabled: next });
-        src.broadcast = next;
-        renderSources();
+        endSourcePatch(src.id, { broadcast: next });
         scheduleSessionSave();
       } catch (e) {
+        endSourcePatch(src.id, { broadcast: next });
+        patchSource(src.id, { broadcast: !next });
+        renderSources();
         showError(String(e));
       }
     });
@@ -545,28 +602,60 @@ function renderSources() {
 }
 
 function upsertSource(dto) {
-  const previous = sources.get(dto.id) || {};
-  sources.set(dto.id, {
-    ...previous,
+  // Mutate in place so click handlers that close over the Map entry stay valid.
+  // Replacing the object made mute/monitor/live toggles need a second click.
+  const previous = sources.get(dto.id);
+  const pending = pendingSourcePatches.get(dto.id) || {};
+  const patch = {
     id: dto.id,
     kind: dto.kind,
     name: dto.name,
-    mute: !!dto.mute,
-    monitor: dto.monitor !== false,
-    broadcast: dto.broadcast !== false,
-    gain: typeof dto.gain === "number" ? dto.gain : 1,
-    deviceId: dto.deviceId ?? previous.deviceId,
-    inputChannel: dto.input_channel ?? dto.inputChannel ?? previous.inputChannel ?? null,
-    processName: dto.processName ?? previous.processName,
-    instrumentPreset: dto.instrument_preset ?? dto.instrumentPreset ?? previous.instrumentPreset ?? 0,
-    effectName: dto.effect_name ?? dto.effectName ?? previous.effectName ?? "",
-    effectPath: dto.effect_path ?? dto.effectPath ?? previous.effectPath ?? "",
-    effectBypass: dto.effect_bypass ?? dto.effectBypass ?? previous.effectBypass ?? false,
-    effectFaulted: dto.effect_faulted ?? dto.effectFaulted ?? previous.effectFaulted ?? false,
-    effectEditorOpen: dto.effect_editor_open ?? dto.effectEditorOpen ?? previous.effectEditorOpen ?? false,
-    effectDirty: dto.effect_dirty ?? dto.effectDirty ?? previous.effectDirty ?? false,
-    effectStateFile: dto.effectStateFile ?? previous.effectStateFile ?? "",
-  });
+    mute: pending.mute !== undefined ? pending.mute : !!dto.mute,
+    monitor: pending.monitor !== undefined ? pending.monitor : dto.monitor !== false,
+    broadcast: pending.broadcast !== undefined ? pending.broadcast : dto.broadcast !== false,
+    gain: pending.gain !== undefined
+      ? pending.gain
+      : typeof dto.gain === "number"
+        ? dto.gain
+        : 1,
+    deviceId: dto.deviceId ?? previous?.deviceId,
+    inputChannel: dto.input_channel ?? dto.inputChannel ?? previous?.inputChannel ?? null,
+    processName: dto.processName ?? previous?.processName,
+    instrumentPreset: dto.instrument_preset ?? dto.instrumentPreset ?? previous?.instrumentPreset ?? 0,
+    effectName: dto.effect_name ?? dto.effectName ?? previous?.effectName ?? "",
+    effectPath: dto.effect_path ?? dto.effectPath ?? previous?.effectPath ?? "",
+    effectBypass: dto.effect_bypass ?? dto.effectBypass ?? previous?.effectBypass ?? false,
+    effectFaulted: dto.effect_faulted ?? dto.effectFaulted ?? previous?.effectFaulted ?? false,
+    effectEditorOpen: dto.effect_editor_open ?? dto.effectEditorOpen ?? previous?.effectEditorOpen ?? false,
+    effectDirty: dto.effect_dirty ?? dto.effectDirty ?? previous?.effectDirty ?? false,
+    effectStateFile: dto.effectStateFile ?? previous?.effectStateFile ?? "",
+  };
+  if (previous) {
+    Object.assign(previous, patch);
+    return previous;
+  }
+  sources.set(dto.id, patch);
+  return patch;
+}
+
+function patchSource(id, fields) {
+  const src = sources.get(id);
+  if (!src) return null;
+  Object.assign(src, fields);
+  return src;
+}
+
+function beginSourcePatch(id, fields) {
+  pendingSourcePatches.set(id, { ...(pendingSourcePatches.get(id) || {}), ...fields });
+  return patchSource(id, fields);
+}
+
+function endSourcePatch(id, fields) {
+  const pending = pendingSourcePatches.get(id);
+  if (!pending) return;
+  for (const key of Object.keys(fields)) delete pending[key];
+  if (Object.keys(pending).length === 0) pendingSourcePatches.delete(id);
+  else pendingSourcePatches.set(id, pending);
 }
 
 async function syncSourcesFromEngine() {
@@ -976,16 +1065,8 @@ async function showLiveOutputList() {
       row.innerHTML = `${ICON.broadcast}<span>${d.name}</span>`;
       row.addEventListener("click", async () => {
         try {
-          await invoke("engine_set_live_device", { deviceId: d.id });
-          liveDestId = d.id;
-          liveDestName = d.name;
-          liveDestReady = true;
-          liveRouteLabel.textContent = d.name;
-          liveRoute.title = `Live · ${d.name}`;
-          liveRoute.classList.remove("unavailable", "attention");
-          scheduleSessionSave();
+          await selectLiveDevice(d);
           closePicker();
-          showError("");
           await refreshStatus();
         } catch (e) {
           showError(String(e));
@@ -1066,6 +1147,12 @@ picker.addEventListener("click", (ev) => {
   if (ev.target === picker) closePicker();
 });
 
+function friendlyError(err) {
+  const raw = String(err || "");
+  if (/no_live_destination/i.test(raw)) return "Choose a Live output first";
+  return raw;
+}
+
 btnLive.addEventListener("click", async () => {
   try {
     await invoke("engine_ensure_running");
@@ -1075,12 +1162,25 @@ btnLive.addEventListener("click", async () => {
       showError("");
       return;
     }
+    if (!liveDestReady) {
+      liveRoute.classList.add("attention");
+      showError("Choose a Live output first");
+      await showLiveOutputList();
+      picker.showModal();
+      return;
+    }
     await invoke("broadcast_enable");
     setAirVisual(true);
     showError("");
   } catch (e) {
     setAirVisual(false);
-    showError(String(e));
+    const msg = friendlyError(e);
+    showError(msg);
+    if (/no_live_destination|Choose a Live output/i.test(msg)) {
+      liveRoute.classList.add("attention");
+      await showLiveOutputList();
+      picker.showModal();
+    }
   }
 });
 
@@ -1150,7 +1250,11 @@ async function refreshStatus() {
     }
     publishTray(false);
 
-    if (!statusEl.textContent.includes("no_live")) showError("");
+    const statusText = statusEl.textContent || "";
+    if (!/no_live|MixBridge Output|Choose a Live output/i.test(statusText)) {
+      const hint = discordHintForLive(liveDestName);
+      showError(hint);
+    }
   } catch (e) {
     engineOnline = false;
     setAirVisual(false);
@@ -1202,13 +1306,17 @@ async function bindTray() {
     const src = sources.get(id);
     if (!src) return;
     const next = !src.mute;
+    beginSourcePatch(id, { mute: next });
+    renderSources();
     try {
       await invoke("engine_set_mute", { id, mute: next });
-      src.mute = next;
-      renderSources();
+      endSourcePatch(id, { mute: next });
       scheduleSessionSave();
       publishTray(true);
     } catch (e) {
+      endSourcePatch(id, { mute: next });
+      patchSource(id, { mute: !next });
+      renderSources();
       showError(String(e));
     }
   });
@@ -1250,6 +1358,7 @@ sessionNameInput.addEventListener("keydown", (event) => {
     await invoke("engine_ensure_running");
     await syncSourcesFromEngine();
     await restoreLastSession();
+    if (!liveDestReady) await preferMixBridgeLive();
     publishTray(true);
   } catch (e) {
     showError(String(e));

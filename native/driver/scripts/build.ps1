@@ -67,8 +67,26 @@ Test-WdkPrerequisites
 $props = @(
     "/p:Configuration=$Configuration",
     "/p:Platform=$Platform",
-    "/v:minimal"
+    "/v:minimal",
+    # Overlay toolset may lack InfVerif native bits; skip verification on local builds.
+    "/p:InfVerif_Enable=false",
+    "/p:EnableInf2cat=false",
+    "/p:ApiValidator_Enable=false"
 )
+
+# When the WDK VS VSIX toolset is not installed system-wide, use the repo overlay
+# (junctions to VC v170 + local WindowsKernelModeDriver10.0 toolset).
+$overlayVc = Join-Path $DriverRoot 'msbuild-vc'
+$systemToolset = Join-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VC\v170" "Platforms\$Platform\PlatformToolsets\WindowsKernelModeDriver10.0\Toolset.props"
+$communityToolset = Join-Path "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170" "Platforms\$Platform\PlatformToolsets\WindowsKernelModeDriver10.0\Toolset.props"
+if (-not (Test-Path $systemToolset) -and -not (Test-Path $communityToolset)) {
+    if (Test-Path (Join-Path $overlayVc 'Platforms\x64\PlatformToolsets\WindowsKernelModeDriver10.0\Toolset.props')) {
+        $overlayPath = $overlayVc
+        if (-not $overlayPath.EndsWith('\') -and -not $overlayPath.EndsWith('/')) { $overlayPath += '\' }
+        Write-Host "Using MixBridge VCTargets overlay: $overlayPath"
+        $props += "/p:VCTargetsPath=$overlayPath"
+    }
+}
 
 if ($Platform -eq 'ARM64') {
     $props += @(
