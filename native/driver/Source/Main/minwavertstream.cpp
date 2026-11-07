@@ -876,6 +876,16 @@ NTSTATUS CMiniportWaveRTStream::GetReadPacket
     // Return next packet number to be read
     *PacketNumber = availablePacketNumber;
 
+    // MixBridge Output: fill this capture packet from the Input→Output cable before the OS reads it.
+    // Event-driven capture relies on GetReadPacket; timer UpdatePosition alone is not enough when
+    // Discord/WASAPI pulls packets faster than the soft-DMA cursor advances.
+    if (m_bCapture && m_pDmaBuffer && m_ulNotificationsPerBuffer != 0 && m_ulDmaBufferSize != 0)
+    {
+        ULONG packetSize = m_ulDmaBufferSize / m_ulNotificationsPerBuffer;
+        ULONG packetIndex = availablePacketNumber % m_ulNotificationsPerBuffer;
+        MixBridgeCableRingRead(m_pDmaBuffer + (packetIndex * packetSize), packetSize);
+    }
+
     // Compute and return timestamp corresponding to the end of the available packet. In a real hardware
     // driver, the timestamp would be computed in a driver and hardware specific manner. In this sample
     // driver, it is extrapolated from the sample driver's internal simulated position correlation
@@ -977,6 +987,14 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket
         KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
         ntStatus = SetCurrentWritePositionInternal(ulCurrentWritePosition);
         KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+
+        // MixBridge Input: OS just finished writing this render packet — push it into the cable.
+        // Copying on SetWritePacket (not only on play-cursor UpdatePosition) is required for
+        // event-driven WaveRT; otherwise capture sees silence while Speakers meters still move.
+        if (NT_SUCCESS(ntStatus) && !m_bCapture && m_pDmaBuffer && packetSize != 0)
+        {
+            MixBridgeCableRingWrite(m_pDmaBuffer + (packetIndex * packetSize), packetSize);
+        }
     }
 
     if (!NT_SUCCESS(ntStatus))

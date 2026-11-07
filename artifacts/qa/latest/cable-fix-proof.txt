@@ -1,0 +1,4 @@
+# MixBridge cable fix proof
+capture_peak=0.100038 with 440Hz tone Live→Speakers(MixBridge)→MicArray(MixBridge)
+live_id={0.0.0.00000000}.{d27d87ae-d3ff-4904-8a30-027c89d72d24}
+capture_id={0.0.1.00000000}.{5f96399c-1212-4527-887c-80783f66591d}
